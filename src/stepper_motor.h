@@ -93,9 +93,23 @@ void rotaceProtiSmeru() {
   krok1();
 }
 
-void otoc_motorem(int uhel, bool ruka_po_smeru){
-  int pocet_kroku = (uhel * 64) / 45;
-  if(ruka_po_smeru){
+void vypni_civky() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+}
+
+void otoc_motorem(int uhel, bool proti_smeru){
+  // Pokud jedeme po směru (proti_smeru == false), odečteme pár stupňů jako korekci proti přetáčení.
+  float korekce = -0.3;
+  if (!proti_smeru) {
+      korekce = -0.2; // O kolik stupňů se to "přetáčí" – lze libovolně doladit
+  }
+  
+  int pocet_kroku = ((uhel - korekce) * 64) / 45;
+  
+  if(proti_smeru){
     for(int i=0;i<pocet_kroku;i++){
       rotaceProtiSmeru();
     }
@@ -105,4 +119,7 @@ void otoc_motorem(int uhel, bool ruka_po_smeru){
       rotacePoSmeru();
     }
   }
+  
+  // Vypnutí cívek na konci může také pomoci s cuknutím/přetáčením na nejbližší magnetický krok
+  vypni_civky();
 }
