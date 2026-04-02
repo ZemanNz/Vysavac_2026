@@ -14,23 +14,29 @@ void setup() {
     rkConfig cfg; 
     rkSetup(cfg);
     delay(50);
-    
-    otevri_nas();
-    delay(3000);
-    zavri_nas();
-    delay(3000);
 
-    rkServosSetPosition(3, 0);
-    delay(1000);
-    rkServosSetPosition(3, -90);
-    delay(5000);
-    rkServosSetPosition(3, 0);
-    delay(1000);
 
+    delay(1000);
+    init_stepper();
+    delay(1000);
+    hledej_nulu_vpravo();
 
 }
 
 void loop() {
+  // Přečte hodnoty ze senzorů
+  uint16_t ir_levy = rkIrLeft();
+  uint16_t ir_pravy = rkIrRight();
 
-  delay(1000); // Wait for a second before the next reading
+  // Vypíše hodnoty do sériového terminálu
+  Serial.print("L: ");
+  Serial.print(ir_levy);
+  Serial.print(" | R: ");
+  Serial.println(ir_pravy);
+
+  // Pokud jsou to senzory s trimrem, pravděpodobně budou hlásit 
+  // hodnoty blízko 0 (když něco vidí) a blízko 4095 (když nic nevidí), 
+  // nebo naopak. Výpisem hned zjistíš, jak se reálně chovají.
+
+  delay(1000); // Zastavení na 1 vteřinu, aby se dalo číst (klidně si můžeš snížit pro rychlejší odezvu)
 }
