@@ -1,10 +1,12 @@
 #include <Arduino.h>
 #include "robotka.h"
+#include "stepper_motor.h"
 
 void setup() {
     rkConfig cfg;
     rkSetup(cfg);
-    printf("Robotka test tlacitek a LED!\n");
+    init_stepper(); // Inicializace krokoveho motoru
+    printf("Robotka test tlacitek! Motor se otoci o 120 stupnu..\n");
 }
 
 void loop() {
@@ -17,17 +19,25 @@ void loop() {
         rkLedRed(false);
     }
 
-    // Dalsi tlacitka (modrou vynechavame, protoze nefunguje)
+    // Pri stisknuti DOWN zapneme zelenou
     if (rkButtonIsPressed(BTN_DOWN)) {
         rkLedGreen(true);
     } else {
         rkLedGreen(false);
     }
 
-    if (rkButtonIsPressed(BTN_LEFT) || rkButtonIsPressed(BTN_RIGHT)) {
+    // Tlacitka LEFT a RIGHT otoci motorem
+    if (rkButtonIsPressed(BTN_LEFT)) {
         rkLedYellow(true);
-    } else {
+        otoc_motorem(120, false); // po smeru hodinovych rucicek
         rkLedYellow(false);
+        while(rkButtonIsPressed(BTN_LEFT)) delay(10); // Cekame na pusteni
+    } 
+    else if (rkButtonIsPressed(BTN_RIGHT)) {
+        rkLedYellow(true);
+        otoc_motorem(120, true); // proti smeru hodinovych rucicek
+        rkLedYellow(false);
+        while(rkButtonIsPressed(BTN_RIGHT)) delay(10); // Cekame na pusteni
     }
 
     // Mala pauza
