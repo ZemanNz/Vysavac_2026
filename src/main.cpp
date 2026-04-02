@@ -1,46 +1,46 @@
-#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_TCS34725.h>
 #include "robotka.h"
 #include "stepper_motor.h"
 
+// Zde se nastaví barva puku, kterou hledáme a sbíráme
+char nase_barva = 'R';
+
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
+float r, g, b;
+
 void setup() {
-    rkConfig cfg;
+    Serial.begin(115200);
+    rkConfig cfg; 
     rkSetup(cfg);
-    init_stepper(); // Inicializace krokoveho motoru
-    printf("Robotka test tlacitek! Motor se otoci o 120 stupnu..\n");
+    delay(50);
+    
+    // Inicializace krokového motoru
+    init_stepper();
+
+    pinMode(21, PULLUP);
+    pinMode(22, PULLUP);
+  
+    // 1) Spust obě I2C sběrnice
+    Wire.begin(21, 22, 400000);
+    Wire.setTimeOut(1);
+    // 2) Inicializuj senzory:
+    // Initialize the color sensor with a unique name and the I2C bus
+    rkColorSensorInit("front", Wire, tcs);
 }
 
 void loop() {
-    // Loop se opakuje do nekonecna
+  // Retrieve RGB values from the sensor named "front"
+  if (rkColorSensorGetRGB("front", &r, &g, &b)) {
+    Serial.print("R: "); Serial.print(r, 3);
+    Serial.print(" G: "); Serial.print(g, 3);
+    Serial.print(" B: "); Serial.println(b, 3);
     
-    // Pri stisknuti UP zapneme cervenou
-    if (rkButtonIsPressed(BTN_UP)) {
-        rkLedRed(true);
-    } else {
-        rkLedRed(false);
-    }
+    // Zpracování barvy puku a otočení motorem přes předanou referenci hodnot
+    roztrid_puk(r, g, b);
+  } else {
+    Serial.println("Sensor 'front' not found.");
+  }
 
-    // Pri stisknuti DOWN zapneme zelenou
-    if (rkButtonIsPressed(BTN_DOWN)) {
-        rkLedGreen(true);
-    } else {
-        rkLedGreen(false);
-    }
-
-    // Tlacitka LEFT a RIGHT otoci motorem
-    if (rkButtonIsPressed(BTN_LEFT)) {
-        rkLedYellow(true);
-        otoc_motorem(120, false); // po smeru hodinovych rucicek
-        rkLedYellow(false);
-        while(rkButtonIsPressed(BTN_LEFT)) delay(10); // Cekame na pusteni
-    } 
-    else if (rkButtonIsPressed(BTN_RIGHT)) {
-        rkLedYellow(true);
-        otoc_motorem(120, true); // proti smeru hodinovych rucicek
-        rkLedYellow(false);
-        while(rkButtonIsPressed(BTN_RIGHT)) delay(10); // Cekame na pusteni
-    }
-
-    // Mala pauza
-    delay(10); 
+  delay(1000); // Wait for a second before the next reading
 }
-
