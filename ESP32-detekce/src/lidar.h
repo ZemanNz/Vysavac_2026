@@ -151,7 +151,7 @@ void loop_lidar() {
         
         // GLOBÁLNÍ ITERATIVNÍ RANSAC: Najde až 3 nejdůležitější dlouhé přímky (do 180st robot z principu víc zdí neuvidí)
         for (int line_idx = 0; line_idx < 3; line_idx++) {
-            if (points_left < 40) break; 
+            if (points_left < 25) break; 
             
             int best_inliers = 0;
             float best_score = 0.0f;
@@ -212,12 +212,12 @@ void loop_lidar() {
                 // VÝPOČET KOMBINERANÉHO SKÓRE (Prioritizuje masivní délku zdi i její hustotu odrazů)
                 float score = (float)inliers * span;
                 
-                if (score > best_score) {
-                    best_score = score; best_inliers = inliers; best_nx = nx; best_ny = ny; best_c = c;
+                if (inliers > best_inliers) {
+                    best_inliers = inliers; best_nx = nx; best_ny = ny; best_c = c;
                 }
             }
             
-            if (best_inliers < 40) break; 
+            if (best_inliers < 25) break; 
             
             // Nyní spočítáme čistou statistiku nalezené stěny (Délka a orientace vektoru)
             float span_min = 999999, span_max = -999999;
@@ -242,7 +242,7 @@ void loop_lidar() {
                 }
             }
             
-            if (final_inliers < 40) continue; // Přísná ochrana (hustota minimálně 40 naměřených zásahů na stěnu)
+            if (final_inliers < 25) continue; // Přísná ochrana (hustota minimálně 25 naměřených zásahů na stěnu)
             
             // Je struna dlouhá alespoň ze 35 cm nametení? Jinak je to prostě odpad smítka v rohu.
             if ((span_max - span_min) < 350.0f) {
@@ -283,6 +283,8 @@ void loop_lidar() {
         // 2. Najdeme nejhustší izolovaný cluster uprostřed
         int best_opp_pts = 0;
         float best_opp_x = 0, best_opp_y = 0;
+        float c_pts_x[150]; // Lokální zásobník pro PCA matici chumlu (aby nedošlo k Stack Overflow uvnitř iterace)
+        float c_pts_y[150];
         
         for (int i = 0; i < n_pts; i++) {
             if (pts[i].used) continue;
@@ -294,20 +296,58 @@ void loop_lidar() {
                     float dx = pts[j].x - pts[i].x;
                     float dy = pts[j].y - pts[i].y;
                     if (dx*dx + dy*dy < 40000.0f) { // Soupeř se vejde do okruhu 20 cm
+                        if (cluster_pts < 150) {
+                            c_pts_x[cluster_pts] = pts[j].x;
+                            c_pts_y[cluster_pts] = pts[j].y;
+                        }
                         cluster_pts++;
                         sum_x += pts[j].x;
                         sum_y += pts[j].y;
                     }
                 }
             }
-            if (cluster_pts > best_opp_pts) {
-                best_opp_pts = cluster_pts;
-                best_opp_x = sum_x;
-                best_opp_y = sum_y;
+            
+            int n_c = (cluster_pts > 150) ? 150 : cluster_pts; // Ochrana proti buffer overflow
+            
+            if (n_c >= 5) {
+                // PCA Analýza dat (Je to Soupeř (křivý) nebo nedetekovaná Rovná zeď(šum)?)
+                float mean_x = sum_x / cluster_pts;
+                float mean_y = sum_y / cluster_pts;
+                float cov_xx = 0, cov_yy = 0, cov_xy = 0;
+                
+                for(int k=0; k<n_c; k++) {
+                    float dx = c_pts_x[k] - mean_x;
+                    float dy = c_pts_y[k] - mean_y;
+                    cov_xx += dx*dx;
+                    cov_yy += dy*dy;
+                    cov_xy += dx*dy;
+                }
+                
+                cov_xx /= n_c; cov_yy /= n_c; cov_xy /= n_c;
+                
+                float trace = cov_xx + cov_yy;
+                float det = cov_xx * cov_yy - cov_xy * cov_xy;
+                float disc = trace*trace - 4*det;
+                if (disc < 0) disc = 0;
+                
+                float lambda1 = (trace + sqrt(disc)) / 2.0f; // Rozptyl podél osy (Length span)
+                float lambda2 = (trace - sqrt(disc)) / 2.0f; // Rozptyl kolmo na osu (Thickness)
+                
+                // Pokud zbytek bodů tvoří útvar Tenčí než 13mm a přitom Delší než 30mm, 
+                // znamená to, že se jedná o neověřenou rovinkatou stěnu, ne o soupeře! Jde rovnou z kola ven!
+                if (sqrt(lambda2) < 13.0f && sqrt(lambda1) > 30.0f) {
+                    continue; 
+                }
+                
+                if (cluster_pts > best_opp_pts) {
+                    best_opp_pts = cluster_pts;
+                    best_opp_x = sum_x;
+                    best_opp_y = sum_y;
+                }
             }
         }
         
-        if (best_opp_pts >= 5) { // Bezpečně zformovaný blob soupeře
+        if (best_opp_pts >= 5) { // Bezpečně zformovaný ne-rovný blob soupeře
             send_packet_opponent(rob_x + (int16_t)(best_opp_x / best_opp_pts), rob_y + (int16_t)(best_opp_y / best_opp_pts));
         }
 
