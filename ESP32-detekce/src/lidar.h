@@ -4,8 +4,8 @@
 
 #define LIDAR_RX 13
 #define LIDAR_TX 10
-
 #define MEM_LIFESPAN_FRAMES 500
+#define ARENA_SIZE 1000.0f
 
 const int PACKET_SIZE = 47;
 uint8_t packet[PACKET_SIZE];
@@ -16,84 +16,73 @@ PBuf pts[500];
 int n_pts = 0;
 bool points_ready = false;
 
-// --- PROTOKOL ---
-// 0xBB 0x55 | type | len | payload... | checksum
-// Type 0: zelená tečka  (x, y) globální
-// Type 1: primka        (x1,y1,x2,y2) globální
-// Type 2: nový frame    (rob_x, rob_y, heading_deg) — 6 bytů
-// Type 3: soupeř        (x, y) globální
+// SLAM stav
+static float g_rx = 500.0f, g_ry = 500.0f, g_h = 0.0f;
 
-void send_packet_new_frame(int16_t rx, int16_t ry, int16_t hdeg) {
-    uint8_t buf[11];
-    buf[0] = 0xBB; buf[1] = 0x55;
-    buf[2] = 2; buf[3] = 6;
-    buf[4] = rx   & 0xFF; buf[5] = (rx  >> 8) & 0xFF;
-    buf[6] = ry   & 0xFF; buf[7] = (ry  >> 8) & 0xFF;
-    buf[8] = hdeg & 0xFF; buf[9] = (hdeg >> 8) & 0xFF;
-    buf[10] = (buf[2]+buf[3]+buf[4]+buf[5]+buf[6]+buf[7]+buf[8]+buf[9]) & 0xFF;
-    Serial.write(buf, 11);
+// Pamet dominantni steny
+float mem_nx = 0, mem_ny = 0;
+int mem_consistent = 0;
+bool mem_locked = false;
+
+// --- Protokol: 0xBB 0x55 | type | len | payload | checksum ---
+void send_frame(int16_t rx, int16_t ry, int16_t hd) {
+    uint8_t b[11];
+    b[0]=0xBB; b[1]=0x55; b[2]=2; b[3]=6;
+    b[4]=rx&0xFF; b[5]=(rx>>8)&0xFF;
+    b[6]=ry&0xFF; b[7]=(ry>>8)&0xFF;
+    b[8]=hd&0xFF; b[9]=(hd>>8)&0xFF;
+    b[10]=(b[2]+b[3]+b[4]+b[5]+b[6]+b[7]+b[8]+b[9])&0xFF;
+    Serial.write(b,11);
+}
+void send_point(int16_t x, int16_t y) {
+    uint8_t b[9];
+    b[0]=0xBB; b[1]=0x55; b[2]=0; b[3]=4;
+    b[4]=x&0xFF; b[5]=(x>>8)&0xFF;
+    b[6]=y&0xFF; b[7]=(y>>8)&0xFF;
+    b[8]=(b[2]+b[3]+b[4]+b[5]+b[6]+b[7])&0xFF;
+    Serial.write(b,9);
+}
+void send_line(int16_t x1,int16_t y1,int16_t x2,int16_t y2) {
+    uint8_t b[13];
+    b[0]=0xBB; b[1]=0x55; b[2]=1; b[3]=8;
+    b[4]=x1&0xFF; b[5]=(x1>>8)&0xFF; b[6]=y1&0xFF; b[7]=(y1>>8)&0xFF;
+    b[8]=x2&0xFF; b[9]=(x2>>8)&0xFF; b[10]=y2&0xFF; b[11]=(y2>>8)&0xFF;
+    b[12]=(b[2]+b[3]+b[4]+b[5]+b[6]+b[7]+b[8]+b[9]+b[10]+b[11])&0xFF;
+    Serial.write(b,13);
+}
+void send_opp(int16_t x, int16_t y) {
+    uint8_t b[9];
+    b[0]=0xBB; b[1]=0x55; b[2]=3; b[3]=4;
+    b[4]=x&0xFF; b[5]=(x>>8)&0xFF;
+    b[6]=y&0xFF; b[7]=(y>>8)&0xFF;
+    b[8]=(b[2]+b[3]+b[4]+b[5]+b[6]+b[7])&0xFF;
+    Serial.write(b,9);
 }
 
-void send_packet_point(int16_t x, int16_t y) {
-    uint8_t buf[9];
-    buf[0] = 0xBB; buf[1] = 0x55;
-    buf[2] = 0; buf[3] = 4;
-    buf[4] = x & 0xFF; buf[5] = (x >> 8) & 0xFF;
-    buf[6] = y & 0xFF; buf[7] = (y >> 8) & 0xFF;
-    buf[8] = (buf[2]+buf[3]+buf[4]+buf[5]+buf[6]+buf[7]) & 0xFF;
-    Serial.write(buf, 9);
+// Lokalni → globalni transformace (CW konvence)
+// gx = rx + lx*cos(h) + ly*sin(h)
+// gy = ry - lx*sin(h) + ly*cos(h)
+void l2g(float lx, float ly, int16_t &gx, int16_t &gy) {
+    float ch = cosf(g_h), sh = sinf(g_h);
+    gx = (int16_t)roundf(g_rx + lx*ch + ly*sh);
+    gy = (int16_t)roundf(g_ry - lx*sh + ly*ch);
 }
 
-void send_packet_line(int16_t x1, int16_t y1, int16_t x2, int16_t y2) {
-    uint8_t buf[13];
-    buf[0] = 0xBB; buf[1] = 0x55;
-    buf[2] = 1; buf[3] = 8;
-    buf[4] = x1 & 0xFF; buf[5] = (x1 >> 8) & 0xFF;
-    buf[6] = y1 & 0xFF; buf[7] = (y1 >> 8) & 0xFF;
-    buf[8] = x2 & 0xFF; buf[9] = (x2 >> 8) & 0xFF;
-    buf[10] = y2 & 0xFF; buf[11] = (y2 >> 8) & 0xFF;
-    buf[12] = (buf[2]+buf[3]+buf[4]+buf[5]+buf[6]+buf[7]+buf[8]+buf[9]+buf[10]+buf[11]) & 0xFF;
-    Serial.write(buf, 13);
-}
-
-void send_packet_opponent(int16_t x, int16_t y) {
-    uint8_t buf[9];
-    buf[0] = 0xBB; buf[1] = 0x55;
-    buf[2] = 3; buf[3] = 4;
-    buf[4] = x & 0xFF; buf[5] = (x >> 8) & 0xFF;
-    buf[6] = y & 0xFF; buf[7] = (y >> 8) & 0xFF;
-    buf[8] = (buf[2]+buf[3]+buf[4]+buf[5]+buf[6]+buf[7]) & 0xFF;
-    Serial.write(buf, 9);
-}
-
-// --- PARSOVÁNÍ LIDAR PAKETU ---
-// Lokální souřadnice: střed = robot, +X = pravá strana, +Y = dopředu
 void processPacket() {
-    uint16_t startAngleX100 = packet[4] | (packet[5] << 8);
-    uint16_t endAngleX100   = packet[42] | (packet[43] << 8);
-    float startAngle = startAngleX100 / 100.0f;
-    float endAngle   = endAngleX100   / 100.0f;
-    float step = (endAngle < startAngle)
-        ? (endAngle + 360.0f - startAngle) / 11.0f
-        : (endAngle - startAngle) / 11.0f;
-
-    for (int i = 0; i < 12; i++) {
-        int baseIndex = 6 + i * 3;
-        uint16_t distance = packet[baseIndex] | (packet[baseIndex + 1] << 8);
-        float angle = startAngle + step * i;
-        angle -= 90.0f;
-        while (angle >= 360.0f) angle -= 360.0f;
-        while (angle < 0.0f)    angle += 360.0f;
-
-        // Přední polokoule: 5° – 175° (lokální)
-        if (angle >= 5.0f && angle <= 175.0f && distance >= 300 && distance < 1500) {
-            float rad = angle * (PI / 180.0f);
-            if (n_pts < 500) {
-                pts[n_pts].x = (int16_t)roundf((float)distance * cosf(rad));
-                pts[n_pts].y = (int16_t)roundf((float)distance * sinf(rad));
-                pts[n_pts].used = false;
-                n_pts++;
-            }
+    uint16_t sa = packet[4]|(packet[5]<<8);
+    uint16_t ea = packet[42]|(packet[43]<<8);
+    float s = sa/100.0f, e = ea/100.0f;
+    float step = (e<s) ? (e+360.0f-s)/11.0f : (e-s)/11.0f;
+    for (int i=0; i<12; i++) {
+        uint16_t d = packet[6+i*3]|(packet[7+i*3]<<8);
+        float a = s + step*i - 90.0f;
+        while(a>=360) a-=360; while(a<0) a+=360;
+        if (a>=5 && a<=175 && d>=300 && d<1500 && n_pts<500) {
+            float r = a*(PI/180.0f);
+            pts[n_pts].x = (int16_t)roundf(d*cosf(r));
+            pts[n_pts].y = (int16_t)roundf(d*sinf(r));
+            pts[n_pts].used = false;
+            n_pts++;
         }
     }
 }
@@ -105,292 +94,178 @@ void init_lidar() {
     Serial2.begin(230400, SERIAL_8N1, LIDAR_RX, LIDAR_TX);
 }
 
-// --- PAMĚŤ DOMINANTNÍ STĚNY ---
-float mem_nx = 0, mem_ny = 0;
-int   mem_consistent = 0;
-bool  mem_locked = false;
-
-// Stabilní pozice robota (průměrovaná z rámce do rámce)
-static float global_rob_x = 500.0f;
-static float global_rob_y = 500.0f;
-static float global_heading = 0.0f; // radiány CW od severu (+Y globální)
-
-// -----------------------------------------------------------------------
-// Pomocná funkce: transformuje lokální bod na globální
-// CW konvence: gx = rx + lx*cos(h) + ly*sin(h)
-//              gy = ry - lx*sin(h) + ly*cos(h)
-// -----------------------------------------------------------------------
-static inline void local_to_global(float lx, float ly,
-                                    float rx,  float ry, float h,
-                                    int16_t &gx, int16_t &gy) {
-    gx = (int16_t)roundf(rx + lx * cosf(h) + ly * sinf(h));
-    gy = (int16_t)roundf(ry - lx * sinf(h) + ly * cosf(h));
-}
-
-// -----------------------------------------------------------------------
 void loop_lidar() {
     while (Serial2.available()) {
         uint8_t c = Serial2.read();
-        if (packetIndex == 0) {
-            if (c == 0x54) packet[packetIndex++] = c;
-        } else if (packetIndex == 1) {
-            if      (c == 0x2C) packet[packetIndex++] = c;
-            else if (c == 0x54) packetIndex = 1;
-            else                packetIndex = 0;
+        if (packetIndex==0) { if(c==0x54) packet[packetIndex++]=c; }
+        else if (packetIndex==1) {
+            if(c==0x2C) packet[packetIndex++]=c;
+            else if(c==0x54) packetIndex=1; else packetIndex=0;
         } else {
-            packet[packetIndex++] = c;
-            if (packetIndex == PACKET_SIZE) {
-                processPacket();
-                packetIndex = 0;
-                if (n_pts > 400) points_ready = true;
+            packet[packetIndex++]=c;
+            if (packetIndex==PACKET_SIZE) {
+                processPacket(); packetIndex=0;
+                if (n_pts>400) points_ready=true;
             }
         }
     }
-
     if (!points_ready) return;
     points_ready = false;
-    int n_local = n_pts;
+    int nl = n_pts;
 
-    // =======================================================
-    // RANSAC – hledání až 3 stěn v lokálních souřadnicích
-    // =======================================================
-    struct WallParams { float nx, ny, c; };
-    struct WallSeg    { float x1, y1, x2, y2; };
-    WallParams walls[3];
-    WallSeg    segs[3];
-    int num_walls = 0;
+    // === RANSAC: az 3 steny v lokalnich souradnicich ===
+    struct W { float nx,ny,c; };
+    struct S { float x1,y1,x2,y2; };
+    W walls[3]; S segs[3]; int nw = 0;
 
-    for (int line_idx = 0; line_idx < 3; line_idx++) {
-        int   best_n = 0;
-        float best_score = 0, best_nx = 0, best_ny = 0, best_c = 0;
-
-        for (int iter = 0; iter < 200; iter++) {
-            int i1 = random(0, n_local), i2 = random(0, n_local);
-            if (pts[i1].used || pts[i2].used || i1 == i2) continue;
-            float dx = pts[i2].x - pts[i1].x;
-            float dy = pts[i2].y - pts[i1].y;
-            float len = sqrtf(dx*dx + dy*dy);
-            if (len < 10.0f) continue;
-            float nx = -dy/len, ny = dx/len;
-
-            // Paměťový zámek na dominantu
-            if (line_idx == 0 && mem_locked)
-                if (fabsf(nx*mem_nx + ny*mem_ny) < 0.85f) continue;
-
-            // Ortogonální omezení vůči první stěně
-            if (num_walls > 0) {
-                float dot = fabsf(nx*walls[0].nx + ny*walls[0].ny);
-                if (dot > 0.174f && dot < 0.984f) continue;
-            }
-
-            float c = -(nx*pts[i1].x + ny*pts[i1].y);
-            int inliers = 0;
-            float smin = 1e9, smax = -1e9;
-            for (int i = 0; i < n_local; i++) {
-                if (pts[i].used) continue;
-                if (fabsf(nx*pts[i].x + ny*pts[i].y + c) < 15.0f) {
-                    inliers++;
-                    float proj = -ny*pts[i].x + nx*pts[i].y;
-                    if (proj < smin) smin = proj;
-                    if (proj > smax) smax = proj;
+    for (int li=0; li<3; li++) {
+        int bn=0; float bs=0, bnx=0, bny=0, bc=0;
+        for (int it=0; it<200; it++) {
+            int i1=random(0,nl), i2=random(0,nl);
+            if (pts[i1].used||pts[i2].used||i1==i2) continue;
+            float dx=pts[i2].x-pts[i1].x, dy=pts[i2].y-pts[i1].y;
+            float len=sqrtf(dx*dx+dy*dy);
+            if (len<10) continue;
+            float nx=-dy/len, ny=dx/len;
+            if (li==0 && mem_locked && fabsf(nx*mem_nx+ny*mem_ny)<0.85f) continue;
+            if (nw>0) { float d=fabsf(nx*walls[0].nx+ny*walls[0].ny); if(d>0.174f&&d<0.984f) continue; }
+            float cc=-(nx*pts[i1].x+ny*pts[i1].y);
+            int inl=0; float sn=1e9, sx=-1e9;
+            for (int i=0;i<nl;i++) {
+                if(pts[i].used) continue;
+                if(fabsf(nx*pts[i].x+ny*pts[i].y+cc)<15) {
+                    inl++; float p=-ny*pts[i].x+nx*pts[i].y;
+                    if(p<sn) sn=p; if(p>sx) sx=p;
                 }
             }
-            float score = inliers * 10000.0f + (smax - smin);
-            if (score > best_score) {
-                best_score = score; best_n = inliers;
-                best_nx = nx; best_ny = ny; best_c = c;
-            }
+            float sc=inl*10000.0f+(sx-sn);
+            if(sc>bs) { bs=sc; bn=inl; bnx=nx; bny=ny; bc=cc; }
         }
-
-        if (best_n < 30) break;
-
-        // Paměť dominantní stěny
-        if (line_idx == 0) {
+        if (bn<30) break;
+        // Pamet
+        if (li==0) {
             if (!mem_locked) {
-                if (mem_consistent == 0 || fabsf(best_nx*mem_nx + best_ny*mem_ny) > 0.85f) {
-                    mem_consistent++;
-                    mem_nx = best_nx; mem_ny = best_ny;
-                    if (mem_consistent >= MEM_LIFESPAN_FRAMES) mem_locked = true;
-                } else { mem_nx = best_nx; mem_ny = best_ny; mem_consistent = 1; }
-            } else { mem_nx = best_nx; mem_ny = best_ny; }
+                if (mem_consistent==0||fabsf(bnx*mem_nx+bny*mem_ny)>0.85f) {
+                    mem_consistent++; mem_nx=bnx; mem_ny=bny;
+                    if (mem_consistent>=MEM_LIFESPAN_FRAMES) mem_locked=true;
+                } else { mem_nx=bnx; mem_ny=bny; mem_consistent=1; }
+            } else { mem_nx=bnx; mem_ny=bny; }
         }
-
-        // Druhý průchod – "spotřebování" bodů + přesné krajní body
-        float smin = 1e9, smax = -1e9;
-        int final_n = 0;
-        for (int i = 0; i < n_local; i++) {
-            if (pts[i].used) continue;
-            if (fabsf(best_nx*pts[i].x + best_ny*pts[i].y + best_c) < 15.0f) {
-                pts[i].used = true; final_n++;
-                float proj = -best_ny*pts[i].x + best_nx*pts[i].y;
-                if (proj < smin) smin = proj;
-                if (proj > smax) smax = proj;
+        // Spotrebovani bodu + krajni body
+        float sn=1e9, sx=-1e9; int fn=0;
+        for (int i=0;i<nl;i++) {
+            if(pts[i].used) continue;
+            if(fabsf(bnx*pts[i].x+bny*pts[i].y+bc)<15) {
+                pts[i].used=true; fn++;
+                float p=-bny*pts[i].x+bnx*pts[i].y;
+                if(p<sn) sn=p; if(p>sx) sx=p;
             }
         }
-        if (final_n < 30 || (smax - smin) < 350.0f) continue;
-
-        // Krajní body primky v lokálním systému (mm od robota)
-        walls[num_walls] = { best_nx, best_ny, best_c };
-        segs[num_walls]  = {
-            -best_ny*smin - best_nx*best_c,
-             best_nx*smin - best_ny*best_c,
-            -best_ny*smax - best_nx*best_c,
-             best_nx*smax - best_ny*best_c
-        };
-        num_walls++;
+        if (fn<30||(sx-sn)<350) continue;
+        walls[nw]={bnx,bny,bc};
+        segs[nw]={-bny*sn-bnx*bc, bnx*sn-bny*bc, -bny*sx-bnx*bc, bnx*sx-bny*bc};
+        nw++;
     }
 
-    // =======================================================
-    // SLAM: z RANSAC stěn odvodit pozici + heading robota
-    //
-    // Princip "překryvu":
-    //   Každá detekovaná primka musí odpovídat jedné ze 4 hranic
-    //   arény (X=0, X=1000, Y=0, Y=1000).
-    //   Vzdálenost od robota k primce = |c|.
-    //   "Kolmice" (foot) z robota na primku = (-c*nx, -c*ny).
-    //   Heading = úhel foot vektoru od lokálního +Y (dopředu).
-    //   Robot_x nebo Robot_y = vzdálenost od té hranice arény.
-    // =======================================================
+    // === SLAM: heading + pozice z prekryvu ===
+    if (nw > 0) {
+        // Foot dominantni steny (vektor od robota ke zdi)
+        float fx = -walls[0].c * walls[0].nx;
+        float fy = -walls[0].c * walls[0].ny;
+        float ch = cosf(g_h), sh = sinf(g_h);
 
-    if (num_walls > 0) {
-        // --- Heading z dominantní stěny ---
-        // foot = vektor od robota k nejbližšímu bodu na primce
-        float f0x = -walls[0].c * walls[0].nx;
-        float f0y = -walls[0].c * walls[0].ny;
-        // Úhel foot od lokálního +Y (dopředu robota)
-        // heading = 0  → robot směřuje sever (+Y globálně), wall přímo vpřed
-        // heading > 0  → robot otočen CW (doprava)
-        float new_heading = atan2f(f0x, f0y);
+        // Rotace foot do globalniho ramce (pomoci PREDCHOZIHO headingu)
+        float fgx = fx*ch + fy*sh;
+        float fgy = -fx*sh + fy*ch;
 
-        // Snapping na nejbližší 90° + zachování jemného úhlu (pro stěnu vpravo/vlevo/nahoře)
-        // Protože LiDAR vidí jen 5°–175°, foot_y > 0 vždy (stěna vždy vpřed).
-        // new_heading ≈ skutečný heading robota vůči normále dané stěny.
-        // Abychom získali absolutní heading, musíme vědět KTERÉ stěně odpovídá:
-        //   |f0y| >> |f0x|  → horizontální stěna = horní/dolní (Y=0 nebo Y=1000)
-        //   |f0x| >> |f0y|  → vertikální stěna = levá/pravá   (X=0 nebo X=1000)
-        // Heading snapsujeme tak, aby north (0°) odpovídal pohledu na horní stěnu přímo vpřed.
+        // Urceni ktere hranici areny odpovida dominantni stena
+        float toff = 0;
+        if (fabsf(fgy) >= fabsf(fgx))
+            toff = (fgy > 0) ? 0.0f : PI;
+        else
+            toff = (fgx > 0) ? (PI/2.0f) : (-PI/2.0f);
 
-        float abs_heading;
-        if (fabsf(f0y) >= fabsf(f0x)) {
-            // Horizontální stěna → heading = new_heading přímo
-            abs_heading = new_heading;
-        } else {
-            // Vertikální stěna → robot vidí boční stěnu jako "přední" → posunout o ±90°
-            if (f0x > 0.0f) abs_heading = new_heading - (PI / 2.0f); // stěna vpravo
-            else             abs_heading = new_heading + (PI / 2.0f); // stěna vlevo
-        }
+        // Heading = offset + odchylka foot od "primo vpred"
+        g_h = toff + atan2f(-fx, fy);
 
-        // Plynulá aktualizace headingu (LERP 30%)
-        global_heading = global_heading * 0.7f + abs_heading * 0.3f;
-
-        // --- Pozice robota z každé detekované stěny ---
-        for (int i = 0; i < num_walls; i++) {
+        // Pozice z kazde steny
+        ch = cosf(g_h); sh = sinf(g_h); // prepocet s novym headingem
+        for (int i=0; i<nw; i++) {
             float fix = -walls[i].c * walls[i].nx;
             float fiy = -walls[i].c * walls[i].ny;
             float dist = fabsf(walls[i].c);
-
-            // Rotujeme foot vektor do globálního rámce (CW konvence)
-            // g_foot = R_cw(heading) * local_foot
-            float gfx = fix * cosf(global_heading) + fiy * sinf(global_heading);
-            float gfy = -fix * sinf(global_heading) + fiy * cosf(global_heading);
-
-            // gfx/gfy říká, na které GLOBÁLNÍ straně leží stěna od robota:
-            //   gfy >> 0  → stěna je globálně "nahoře" (Y=1000)
-            //   gfy << 0  → stěna je globálně "dole"   (Y=0)     [LiDARem těžko vidět]
-            //   gfx >> 0  → stěna je globálně "vpravo"  (X=1000)
-            //   gfx << 0  → stěna je globálně "vlevo"   (X=0)
-            const float thresh = 0.6f;
-            if (gfy > thresh * dist) {
-                // Stěna je globálně nahoře → Y=1000
-                global_rob_y = global_rob_y * 0.7f + (1000.0f - dist) * 0.3f;
-            } else if (gfy < -thresh * dist) {
-                // Stěna je globálně dole → Y=0
-                global_rob_y = global_rob_y * 0.7f + dist * 0.3f;
-            } else if (gfx > thresh * dist) {
-                // Stěna je globálně vpravo → X=1000
-                global_rob_x = global_rob_x * 0.7f + (1000.0f - dist) * 0.3f;
-            } else if (gfx < -thresh * dist) {
-                // Stěna je globálně vlevo → X=0
-                global_rob_x = global_rob_x * 0.7f + dist * 0.3f;
+            float gfx = fix*ch + fiy*sh;
+            float gfy = -fix*sh + fiy*ch;
+            if (fabsf(gfy) >= fabsf(gfx)) {
+                if (gfy>0) g_ry = ARENA_SIZE - dist; // horni stena Y=1000
+                else       g_ry = dist;               // spodni Y=0
+            } else {
+                if (gfx>0) g_rx = ARENA_SIZE - dist; // prava X=1000
+                else       g_rx = dist;               // leva X=0
             }
         }
     }
 
-    // Zaokrouhlení pro protokol
-    int16_t rx = (int16_t)roundf(global_rob_x);
-    int16_t ry = (int16_t)roundf(global_rob_y);
-    int16_t hd = (int16_t)roundf(global_heading * 180.0f / PI);
+    // === Odeslani vsech dat v globalnich souradnicich ===
+    int16_t rx=(int16_t)roundf(constrain(g_rx,0,ARENA_SIZE));
+    int16_t ry=(int16_t)roundf(constrain(g_ry,0,ARENA_SIZE));
+    int16_t hd=(int16_t)roundf(g_h*180.0f/PI);
+    send_frame(rx, ry, hd);
 
-    // =======================================================
-    // ODESLÁNÍ DAT DO PC
-    // Pořadí: 1) nový frame (smaže staré čáry v Pythonu)
-    //         2) transformované stěny (překryjí hranice arény)
-    //         3) transformované zelené body (point cloud)
-    //         4) soupeř
-    // =======================================================
-    send_packet_new_frame(rx, ry, hd);
-
-    // Stěny v globálních souřadnicích (přímky překrývající hranice arény)
-    for (int i = 0; i < num_walls; i++) {
-        int16_t gx1, gy1, gx2, gy2;
-        local_to_global(segs[i].x1, segs[i].y1, global_rob_x, global_rob_y, global_heading, gx1, gy1);
-        local_to_global(segs[i].x2, segs[i].y2, global_rob_x, global_rob_y, global_heading, gx2, gy2);
-        send_packet_line(gx1, gy1, gx2, gy2);
+    // Steny (primky prekryvajici hranice areny)
+    for (int i=0; i<nw; i++) {
+        int16_t gx1,gy1,gx2,gy2;
+        l2g(segs[i].x1, segs[i].y1, gx1, gy1);
+        l2g(segs[i].x2, segs[i].y2, gx2, gy2);
+        send_line(gx1,gy1,gx2,gy2);
     }
 
-    // Zelené body v globálních souřadnicích
-    for (int i = 0; i < n_local; i++) {
-        int16_t gx, gy;
-        local_to_global((float)pts[i].x, (float)pts[i].y,
-                        global_rob_x, global_rob_y, global_heading, gx, gy);
-        send_packet_point(gx, gy);
+    // Zelene body
+    for (int i=0; i<nl; i++) {
+        int16_t gx,gy;
+        l2g((float)pts[i].x, (float)pts[i].y, gx, gy);
+        send_point(gx, gy);
     }
 
-    // --- Detekce soupeře (PCA filtr) ---
-    for (int i = 0; i < n_local; i++) {
-        if (!pts[i].used) {
-            for (int w = 0; w < num_walls; w++) {
-                if (fabsf(walls[w].nx*pts[i].x + walls[w].ny*pts[i].y + walls[w].c) < 120.0f) {
-                    pts[i].used = true; break;
+    // === Detekce soupere (PCA) ===
+    for (int i=0;i<nl;i++) {
+        if(!pts[i].used) {
+            for(int w=0;w<nw;w++) {
+                if(fabsf(walls[w].nx*pts[i].x+walls[w].ny*pts[i].y+walls[w].c)<120) {
+                    pts[i].used=true; break;
                 }
             }
         }
     }
-
-    int   best_opp = 0; float box = 0, boy = 0;
-    float cpx[150], cpy[150];
-    for (int i = 0; i < n_local; i++) {
-        if (pts[i].used) continue;
-        int cnt = 0; float sx = 0, sy = 0;
-        for (int j = 0; j < n_local; j++) {
-            if (!pts[j].used) {
-                float dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y;
-                if (dx*dx + dy*dy < 40000.0f) {
-                    if (cnt < 150) { cpx[cnt] = pts[j].x; cpy[cnt] = pts[j].y; }
-                    cnt++; sx += pts[j].x; sy += pts[j].y;
+    int bo=0; float bsx=0,bsy=0;
+    float cpx[150],cpy[150];
+    for (int i=0;i<nl;i++) {
+        if(pts[i].used) continue;
+        int cnt=0; float sx=0,sy=0;
+        for(int j=0;j<nl;j++) {
+            if(!pts[j].used) {
+                float dx=pts[j].x-pts[i].x, dy=pts[j].y-pts[i].y;
+                if(dx*dx+dy*dy<40000) {
+                    if(cnt<150){cpx[cnt]=pts[j].x;cpy[cnt]=pts[j].y;}
+                    cnt++; sx+=pts[j].x; sy+=pts[j].y;
                 }
             }
         }
-        int nc = (cnt > 150) ? 150 : cnt;
-        if (nc < 5) continue;
-        float mx = sx/cnt, my = sy/cnt, cxx=0, cyy=0, cxy=0;
-        for (int k = 0; k < nc; k++) {
-            float dx=cpx[k]-mx, dy=cpy[k]-my;
-            cxx+=dx*dx; cyy+=dy*dy; cxy+=dx*dy;
+        int nc=(cnt>150)?150:cnt;
+        if(nc>=5) {
+            float mx=sx/cnt,my=sy/cnt,cxx=0,cyy=0,cxy=0;
+            for(int k=0;k<nc;k++){float dx=cpx[k]-mx,dy=cpy[k]-my;cxx+=dx*dx;cyy+=dy*dy;cxy+=dx*dy;}
+            cxx/=nc;cyy/=nc;cxy/=nc;
+            float tr=cxx+cyy,det=cxx*cyy-cxy*cxy,disc=tr*tr-4*det;
+            if(disc<0)disc=0;
+            if(sqrtf((tr-sqrtf(disc))/2)<13&&sqrtf((tr+sqrtf(disc))/2)>30) continue;
+            if(cnt>bo){bo=cnt;bsx=sx;bsy=sy;}
         }
-        cxx/=nc; cyy/=nc; cxy/=nc;
-        float tr=cxx+cyy, det=cxx*cyy-cxy*cxy, disc=tr*tr-4*det;
-        if (disc<0) disc=0;
-        float l1=(tr+sqrtf(disc))/2, l2=(tr-sqrtf(disc))/2;
-        if (sqrtf(l2) < 13.0f && sqrtf(l1) > 30.0f) continue;
-        if (cnt > best_opp) { best_opp = cnt; box = sx; boy = sy; }
     }
-
-    if (best_opp >= 5) {
-        int16_t gox, goy;
-        local_to_global(box/best_opp, boy/best_opp,
-                        global_rob_x, global_rob_y, global_heading, gox, goy);
-        send_packet_opponent(gox, goy);
+    if(bo>=5) {
+        int16_t gx,gy;
+        l2g(bsx/bo, bsy/bo, gx, gy);
+        send_opp(gx, gy);
     }
 
     n_pts = 0;
