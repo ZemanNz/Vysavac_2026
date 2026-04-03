@@ -9,23 +9,18 @@ const int PACKET_SIZE = 47;
 uint8_t packet[PACKET_SIZE];
 int packetIndex = 0;
 
-// Absolutní pozice robota na 1x1m hřišti
+// Robot staticky uprostřed hřiště pro snazší debug a nezavislost mapování zdi
 int16_t rob_x = 500;
-int16_t rob_y = 0;
+int16_t rob_y = 500; 
 
-// Počet automaticky zahazovaných největších naměřených chyb (odseknutí top čtverců)
-const int NUM_OUTLIERS = 8;
-
-// Polní buffery pro uložení surových mapových bodů v dané čtvrtině zdí
-struct PBuf { int16_t x; int16_t y; };
-PBuf pts_R[150]; int n_R = 0;
-PBuf pts_F[150]; int n_F = 0;
-PBuf pts_L[150]; int n_L = 0;
+// Globální buffer pro VŠECHNY viditelné body (žádné omezující sektory L/R/F)
+struct PBuf { int16_t x; int16_t y; bool used; };
+PBuf pts[500];
+int n_pts = 0;
 
 uint32_t last_scan_time = 0;
 
-
-// --- ODESÍLACÍ FUNKCE PROTOKOLU (0xBB 0x55) ---
+// --- ODESÍLACÍ FUNKCE PROTOKOLU ---
 void send_packet_point(int16_t x, int16_t y) {
     uint8_t buf[9];
     buf[0] = 0xBB; buf[1] = 0x55;
@@ -58,71 +53,6 @@ void send_packet_robot(int16_t x, int16_t y) {
     Serial.write(buf, 9);
 }
 
-// --- POKROČILÁ DVOU-FÁZOVÁ REGRESE S ODSEKNUTÍM CHYB ---
-bool robustFitLine(PBuf* pts, int n, float& m, float& b, bool is_X_on_Y) {
-    if (n < NUM_OUTLIERS + 3) return false; // Není dostatek bodů pro výpočet a odstranění
-    
-    // Fáze 1: První hrubý nástřel Least Squares regrese
-    float sX=0, sY=0, sXY=0, sS=0;
-    for(int i=0; i<n; i++) {
-        sX += pts[i].x; sY += pts[i].y;
-        if(is_X_on_Y) { sXY += pts[i].x * pts[i].y; sS += pts[i].y * pts[i].y; }
-        else { sXY += pts[i].x * pts[i].y; sS += pts[i].x * pts[i].x; }
-    }
-    float m_init, b_init;
-    if (is_X_on_Y) {
-        float denom = (n * sS) - (sY * sY) + 0.0001f;
-        m_init = ((n * sXY) - (sY * sX)) / denom;
-        b_init = (sX - m_init * sY) / n;
-    } else {
-        float denom = (n * sS) - (sX * sX) + 0.0001f;
-        m_init = ((n * sXY) - (sX * sY)) / denom;
-        b_init = (sY - m_init * sX) / n;
-    }
-
-    // Fáze 2: Odstranění specifikovaného počtu "největších čtverců" (odštěpků/chyb)
-    bool excl[150] = {false};
-    for(int k=0; k<NUM_OUTLIERS; k++) {
-        float max_err = -1.0f; int max_i = -1;
-        for(int i=0; i<n; i++) {
-            if(excl[i]) continue;
-            float err;
-            if(is_X_on_Y) {
-                float pX = m_init * pts[i].y + b_init;
-                err = (pts[i].x - pX) * (pts[i].x - pX);
-            } else {
-                float pY = m_init * pts[i].x + b_init;
-                err = (pts[i].y - pY) * (pts[i].y - pY);
-            }
-            if(err > max_err) { max_err = err; max_i = i; }
-        }
-        if(max_i >= 0) excl[max_i] = true;
-    }
-
-    // Fáze 3: Nový, zcela přesný výpočet bez oněch chyb
-    int final_n = 0; sX=0; sY=0; sXY=0; sS=0;
-    for(int i=0; i<n; i++) {
-        if(!excl[i]) {
-            final_n++;
-            sX += pts[i].x; sY += pts[i].y;
-            if(is_X_on_Y) { sXY+=pts[i].x*pts[i].y; sS+=pts[i].y*pts[i].y; }
-            else { sXY+=pts[i].x*pts[i].y; sS+=pts[i].x*pts[i].x; }
-        }
-    }
-    
-    if (is_X_on_Y) {
-        float denom = (final_n * sS) - (sY * sY) + 0.0001f;
-        m = ((final_n * sXY) - (sY * sX)) / denom;
-        b = (sX - m * sY) / final_n;
-    } else {
-        float denom = (final_n * sS) - (sX * sX) + 0.0001f;
-        m = ((final_n * sXY) - (sX * sY)) / denom;
-        b = (sY - m * sX) / final_n;
-    }
-    return true;
-}
-
-
 void processPacket() {
     uint16_t startAngleX100 = packet[4] | (packet[5] << 8);
     uint16_t endAngleX100 = packet[42] | (packet[43] << 8);
@@ -143,8 +73,8 @@ void processPacket() {
         while (angle >= 360.0f) angle -= 360.0f;
         while (angle < 0.0f) angle += 360.0f;
         
-        // Zorné pole sníženo na 160° okno
-        if (angle >= 10.0f && angle <= 170.0f) {
+        // Snížení "šíleně za záda" zdi – povoleno to co robot orientačně mapuje kolem sebe
+        if (angle >= 5.0f && angle <= 175.0f) {
             float rad = angle * (PI / 180.0f);
             
             float fx = (float)distance * cos(rad);
@@ -152,16 +82,17 @@ void processPacket() {
             int16_t x = round(fx);
             int16_t y = round(fy);
             
-            send_packet_point(rob_x + x, rob_y + y);
-
-            // 1. Zvýšený limit "odstínění" mrtvé sféry z 20cm rovnou na 30 cm = 300 mm!
+            // Limitace robotova těla a okrajů pokoje (30cm až 1.5m)
             if (distance >= 300 && distance < 1500) {
-                if (angle >= 10.0f && angle <= 60.0f) {         
-                    if (n_R < 150) { pts_R[n_R].x = x; pts_R[n_R].y = y; n_R++; }
-                } else if (angle > 60.0f && angle <= 120.0f) {   
-                    if (n_F < 150) { pts_F[n_F].x = x; pts_F[n_F].y = y; n_F++; }
-                } else if (angle > 120.0f && angle <= 170.0f) {  
-                    if (n_L < 150) { pts_L[n_L].x = x; pts_L[n_L].y = y; n_L++; }
+                // Přímé streamování zelených teček na PC
+                send_packet_point(rob_x + x, rob_y + y);
+
+                // Hodit nekompromisně všechno na jednu globální pánev
+                if (n_pts < 500) {
+                    pts[n_pts].x = x;
+                    pts[n_pts].y = y;
+                    pts[n_pts].used = false; // Ještě nezařazeno do žádné stěny
+                    n_pts++;
                 }
             }
         }
@@ -170,6 +101,7 @@ void processPacket() {
 
 void init_lidar() {
     Serial.begin(921600);
+    randomSeed(analogRead(34)); // Pevné seedování Ransacu
     Serial2.setRxBufferSize(1024);
     Serial2.begin(230400, SERIAL_8N1, LIDAR_RX, LIDAR_TX);
 }
@@ -193,49 +125,106 @@ void loop_lidar() {
         }
     }
     
-    // Na konci každé rotace provedeme regresi bez chyb a nakreslíme výsledek odvozené absolutní mapy
+    // Zpracování dat 8x za vteřinu
     if (millis() - last_scan_time > 120) {
         
-        float b_L = 0, m_L = 0;
-        bool L_valid = robustFitLine(pts_L, n_L, m_L, b_L, true);
-
-        float b_R = 0, m_R = 0;
-        bool R_valid = robustFitLine(pts_R, n_R, m_R, b_R, true);
-
-        float b_F = 0, m_F = 0;
-        bool F_valid = robustFitLine(pts_F, n_F, m_F, b_F, false);
-
-        // --- ODVOZENÍ POZICE ROBOTA ---
-        if (L_valid && R_valid) {
-            rob_x = (-b_L + (1000 - b_R)) / 2;
-        } else if (L_valid) {
-            rob_x = -b_L;
-        } else if (R_valid) {
-            rob_x = 1000 - b_R;
-        }
-        if (F_valid) rob_y = 1000 - b_F;
-        
+        // Pevná, zabetonovaná pozice přesně uprostřed hřiště
+        rob_x = 500; 
+        rob_y = 500;
         send_packet_robot(rob_x, rob_y);
+        
+        int points_left = n_pts;
+        
+        // GLOBÁLNÍ ITERATIVNÍ RANSAC: Najde až 4 nejdůležitější dlouhé přímky nehledě na jejich kolmost
+        for (int line_idx = 0; line_idx < 4; line_idx++) {
+            if (points_left < 15) break; 
+            
+            int best_inliers = 0;
+            float best_nx = 0, best_ny = 0, best_c = 0;
+            
+            // Nahodíme přes celou hromadu 40 náhodných hádankových přímek
+            for (int iter = 0; iter < 40; iter++) {
+                int retries = 0;
+                int i1 = random(0, n_pts);
+                while (pts[i1].used && retries < 15) { i1 = random(0, n_pts); retries++; }
+                if (pts[i1].used) continue;
+                
+                int i2 = random(0, n_pts);
+                retries = 0;
+                while ((pts[i2].used || i1 == i2) && retries < 15) { i2 = random(0, n_pts); retries++; }
+                if (pts[i2].used || i1 == i2) continue;
+                
+                float p1x = pts[i1].x, p1y = pts[i1].y;
+                float p2x = pts[i2].x, p2y = pts[i2].y;
+                float dx = p2x - p1x;
+                float dy = p2y - p1y;
+                float len = sqrt(dx*dx + dy*dy);
+                if (len < 10.0f) continue; // Stejné vzdálené body nevyváří přímku
+                
+                // Určíme normálu úsečky (Rovnice Ax + By + C = 0 dokáže otáčet 360 stupni svobodně zeď po zdi)
+                float nx = -dy / len;
+                float ny = dx / len;
+                float c = -(nx * p1x + ny * p1y); 
+                
+                int inliers = 0;
+                for (int i = 0; i < n_pts; i++) {
+                    if (pts[i].used) continue;
+                    // Výpočet čisté kolmé dálky k této natržené niti (Vzdálenost bodu od přímky v rovině)
+                    float dist = abs(nx * pts[i].x + ny * pts[i].y + c);
+                    if (dist < 40.0f) inliers++;
+                }
+                
+                // Uložíme jen tu "nejtlustší logickou" strunu protínající stěnu
+                if (inliers > best_inliers) {
+                    best_inliers = inliers; best_nx = nx; best_ny = ny; best_c = c;
+                }
+            }
+            
+            if (best_inliers < 15) break; 
+            
+            // Nyní spočítáme čistou statistiku nalezené stěny (Délka a orientace vektoru)
+            float span_min = 999999, span_max = -999999;
+            float avg_x = 0, avg_y = 0;
+            int final_inliers = 0;
+            
+            // Druhá prochodní iterace přes Inliere – Teď stěnu trvale z pole "zkonzumujeme"
+            for (int i = 0; i < n_pts; i++) {
+                if (pts[i].used) continue;
+                float dist = abs(best_nx * pts[i].x + best_ny * pts[i].y + best_c);
+                if (dist < 40.0f) {
+                    pts[i].used = true; // Vymazáno ze světa! Zítřejší stěna 2,3,4 už je neuvidí!
+                    points_left--;
+                    final_inliers++;
+                    avg_x += pts[i].x;
+                    avg_y += pts[i].y;
+                    
+                    // Po Strune odhadneme délku shluku (Aby křesla a lživá zrcadlení rohu tvořící tečny shořely)
+                    float proj = (-best_ny) * pts[i].x + (best_nx) * pts[i].y;
+                    if (proj < span_min) span_min = proj;
+                    if (proj > span_max) span_max = proj;
+                }
+            }
+            
+            // Je struna dlouhá alespoň ze 35 cm nametení? Jinak je to prostě odpad smítka v rohu.
+            if ((span_max - span_min) < 350.0f) {
+                continue; // Odpad (botu/křeslo/vysavač) jsme díky used=true už teď smazali tak či tak, ale PC se o něm nedozví! Nestav se překážkám zdi!
+            }
+            
+            // Těžištěm středu vytáhneme nekonečnou Fialovou přes Python obálku
+            avg_x /= final_inliers;
+            avg_y /= final_inliers;
+            
+            float vx = -best_ny; float vy = best_nx;
+            int16_t x1 = rob_x + (int16_t)(avg_x - 1500 * vx);
+            int16_t y1 = rob_y + (int16_t)(avg_y - 1500 * vy);
+            int16_t x2 = rob_x + (int16_t)(avg_x + 1500 * vx);
+            int16_t y2 = rob_y + (int16_t)(avg_y + 1500 * vy);
+            
+            send_packet_line(x1, y1, x2, y2);
+        }
 
-        // --- ODVOZENÍ DLOUHÝCH STĚN PŘES CELÉ PLÁTNO ---
-        if (L_valid) {
-            int16_t y_start = -500; int16_t x_start = rob_x + (int16_t)(m_L * y_start + b_L);
-            int16_t y_end = 1500;   int16_t x_end = rob_x + (int16_t)(m_L * y_end + b_L);
-            send_packet_line(x_start, rob_y + y_start, x_end, rob_y + y_end);
-        }
-        if (R_valid) {
-            int16_t y_start = -500; int16_t x_start = rob_x + (int16_t)(m_R * y_start + b_R);
-            int16_t y_end = 1500;   int16_t x_end = rob_x + (int16_t)(m_R * y_end + b_R);
-            send_packet_line(x_start, rob_y + y_start, x_end, rob_y + y_end);
-        }
-        if (F_valid) {
-            int16_t x_start = -500; int16_t y_start = rob_y + (int16_t)(m_F * x_start + b_F);
-            int16_t x_end = 1500;   int16_t y_end = rob_y + (int16_t)(m_F * x_end + b_F);
-            send_packet_line(rob_x + x_start, y_start, rob_x + x_end, y_end);
-        }
-
-        // Reset bufferů
-        n_L = 0; n_R = 0; n_F = 0;
+        // Vyčistit lokální pole (nová otáčka zčuchne čistý papír dat)
+        n_pts = 0;
         last_scan_time = millis();
     }
 }
