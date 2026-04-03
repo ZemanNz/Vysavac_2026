@@ -145,15 +145,20 @@ void loop_lidar() {
         
         int points_left = n_pts;
         
-        // GLOBÁLNÍ ITERATIVNÍ RANSAC: Najde až 4 nejdůležitější dlouhé přímky nehledě na jejich kolmost
-        for (int line_idx = 0; line_idx < 4; line_idx++) {
-            if (points_left < 15) break; 
+        struct LineParams { float nx; float ny; float c; };
+        LineParams walls[4];
+        int num_walls = 0;
+        
+        // GLOBÁLNÍ ITERATIVNÍ RANSAC: Najde až 3 nejdůležitější dlouhé přímky (do 180st robot z principu víc zdí neuvidí)
+        for (int line_idx = 0; line_idx < 3; line_idx++) {
+            if (points_left < 40) break; 
             
             int best_inliers = 0;
+            float best_score = 0.0f;
             float best_nx = 0, best_ny = 0, best_c = 0;
             
-            // Nahodíme přes celou hromadu 40 náhodných hádankových přímek
-            for (int iter = 0; iter < 40; iter++) {
+            // Nahodíme přes celou hromadu masivních 80 náhodných hádankových přímek pro absolutní jistotu
+            for (int iter = 0; iter < 80; iter++) {
                 int retries = 0;
                 int i1 = random(0, n_pts);
                 while (pts[i1].used && retries < 15) { i1 = random(0, n_pts); retries++; }
@@ -171,26 +176,48 @@ void loop_lidar() {
                 float len = sqrt(dx*dx + dy*dy);
                 if (len < 10.0f) continue; // Stejné vzdálené body nevyváří přímku
                 
-                // Určíme normálu úsečky (Rovnice Ax + By + C = 0 dokáže otáčet 360 stupni svobodně zeď po zdi)
+                // Určíme normálu úsečky
                 float nx = -dy / len;
                 float ny = dx / len;
+                
+                // --- ORTOGONÁLNÍ KOREKCE (Geometrie arény) ---
+                // První se vždy najde ta nejvíce nasvícená dominantní stěna. Obě další zbylé stěny 
+                // k ní podle stavby čtverce musí být vždy logicky kolmé nebo rovnoběžné (+- 10 stupňů tolerance)
+                if (num_walls > 0) {
+                    float dot = abs(nx * walls[0].nx + ny * walls[0].ny);
+                    // Cos(80°) = 0.174, Cos(10°) = 0.984
+                    if (dot > 0.174f && dot < 0.984f) {
+                        continue; // Šikmá 45° čára směřující bůhvíkde do soupeře se natvrdo odmítne!
+                    }
+                }
+                
                 float c = -(nx * p1x + ny * p1y); 
                 
                 int inliers = 0;
+                float span_min = 999999, span_max = -999999;
                 for (int i = 0; i < n_pts; i++) {
                     if (pts[i].used) continue;
-                    // Výpočet čisté kolmé dálky k této natržené niti (Vzdálenost bodu od přímky v rovině)
                     float dist = abs(nx * pts[i].x + ny * pts[i].y + c);
-                    if (dist < 40.0f) inliers++;
+                    if (dist < 40.0f) {
+                        inliers++;
+                        float proj = (-ny) * pts[i].x + (nx) * pts[i].y;
+                        if (proj < span_min) span_min = proj;
+                        if (proj > span_max) span_max = proj;
+                    }
                 }
                 
-                // Uložíme jen tu "nejtlustší logickou" strunu protínající stěnu
-                if (inliers > best_inliers) {
-                    best_inliers = inliers; best_nx = nx; best_ny = ny; best_c = c;
+                float span = span_max - span_min;
+                if (inliers < 2) span = 0.0f; // Bezpečnost
+                
+                // VÝPOČET KOMBINERANÉHO SKÓRE (Prioritizuje masivní délku zdi i její hustotu odrazů)
+                float score = (float)inliers * span;
+                
+                if (score > best_score) {
+                    best_score = score; best_inliers = inliers; best_nx = nx; best_ny = ny; best_c = c;
                 }
             }
             
-            if (best_inliers < 25) break; 
+            if (best_inliers < 40) break; 
             
             // Nyní spočítáme čistou statistiku nalezené stěny (Délka a orientace vektoru)
             float span_min = 999999, span_max = -999999;
@@ -215,7 +242,7 @@ void loop_lidar() {
                 }
             }
             
-            if (final_inliers < 25) continue; // Přísná ochrana (hustota minimálně 25 naměřených zásahů na stěnu)
+            if (final_inliers < 40) continue; // Přísná ochrana (hustota minimálně 40 naměřených zásahů na stěnu)
             
             // Je struna dlouhá alespoň ze 35 cm nametení? Jinak je to prostě odpad smítka v rohu.
             if ((span_max - span_min) < 350.0f) {
@@ -232,26 +259,56 @@ void loop_lidar() {
             int16_t x2 = rob_x + (int16_t)(avg_x + 1500 * vx);
             int16_t y2 = rob_y + (int16_t)(avg_y + 1500 * vy);
             
+            
+            walls[num_walls].nx = best_nx; walls[num_walls].ny = best_ny; walls[num_walls].c = best_c;
+            num_walls++;
+            
             send_packet_line(x1, y1, x2, y2);
         }
 
         // --- DETEKCE SOUPEŘE ZE ZBYTKU BODŮ ---
-        float opp_x = 0, opp_y = 0;
-        int opp_pts = 0;
         
+        // 1. Očistíme mapu od zbytků zdí (stíny, odštěpky, nedodělky), soupeř nesmí být nalepený < 12cm na zdi
         for (int i = 0; i < n_pts; i++) {
             if (!pts[i].used) {
-                // Slitek veškerého zbylého materiálu
-                opp_x += pts[i].x;
-                opp_y += pts[i].y;
-                opp_pts++;
+                for (int w = 0; w < num_walls; w++) {
+                    if (abs(walls[w].nx * pts[i].x + walls[w].ny * pts[i].y + walls[w].c) < 120.0f) {
+                        pts[i].used = true; // Vymazáno!
+                        break;
+                    }
+                }
             }
         }
         
-        if (opp_pts >= 4) { // Je to shluk alespoň 4 bodů (Ne ojedinělý Lidar šum)
-            opp_x /= opp_pts;
-            opp_y /= opp_pts;
-            send_packet_opponent(rob_x + (int16_t)opp_x, rob_y + (int16_t)opp_y);
+        // 2. Najdeme nejhustší izolovaný cluster uprostřed
+        int best_opp_pts = 0;
+        float best_opp_x = 0, best_opp_y = 0;
+        
+        for (int i = 0; i < n_pts; i++) {
+            if (pts[i].used) continue;
+            
+            int cluster_pts = 0;
+            float sum_x = 0, sum_y = 0;
+            for (int j = 0; j < n_pts; j++) {
+                if (!pts[j].used) {
+                    float dx = pts[j].x - pts[i].x;
+                    float dy = pts[j].y - pts[i].y;
+                    if (dx*dx + dy*dy < 40000.0f) { // Soupeř se vejde do okruhu 20 cm
+                        cluster_pts++;
+                        sum_x += pts[j].x;
+                        sum_y += pts[j].y;
+                    }
+                }
+            }
+            if (cluster_pts > best_opp_pts) {
+                best_opp_pts = cluster_pts;
+                best_opp_x = sum_x;
+                best_opp_y = sum_y;
+            }
+        }
+        
+        if (best_opp_pts >= 5) { // Bezpečně zformovaný blob soupeře
+            send_packet_opponent(rob_x + (int16_t)(best_opp_x / best_opp_pts), rob_y + (int16_t)(best_opp_y / best_opp_pts));
         }
 
         // Vyčistit lokální pole (nová otáčka zčuchne čistý papír dat)

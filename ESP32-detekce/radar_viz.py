@@ -130,16 +130,27 @@ while running:
                                 
                         elif msg_type == 1 and msg_len == 8:
                             x1, y1, x2, y2 = struct.unpack('<hhhh', payload)
-                            # Type 1 Stěna (Fialově prokládaná Metodou Nejmenšího Čtverce / Linear Regression) z ESP
-                            # Vykresluje se na obří vzdálenosti bez omezování
-                            lines.append((x1, y1, x2, y2, (200, 0, 255), current_time))
+                            
+                            # První stěna ve snímku pochází z hlavní iterace ESP (Dominanta)
+                            if len(lines) == 0:
+                                col = (255, 255, 0) # Žlutá
+                            else:
+                                col = (200, 0, 255) # Fialová
+                                
+                            lines.append((x1, y1, x2, y2, col, current_time))
                             
                         elif msg_type == 2 and msg_len == 4:
-                            # Type 2 Aktuální kalkulovaná Pozice/Odometrie robota dle shluků
+                            # Type 2 Aktuální kalkulovaná Pozice/Odometrie robota (START NOVÉHO SNÍMKU)
                             rx, ry = struct.unpack('<hh', payload)
                             if 0 <= rx <= 1000 and 0 <= ry <= 1000:
                                 robot_x_mm = rx
                                 robot_y_mm = ry
+                            
+                            # Magický klíč: Odometrie se posílá jako PRVNÍ na začátku každého výpočetního cyklu ESP.
+                            # Tím pádem zde okamžitě smažeme všechny STARÉ čáry a soupeře z minulého snímku!!!
+                            # Vyřeší to "duchy" (více než 3 linky nebo 2 soupeře plovoucí přes sebe).
+                            lines.clear()
+                            opponents.clear()
                                 
                         elif msg_type == 3 and msg_len == 4:
                             # Type 3 Detekovaný soupeř (těžiště nepřátelského zbytku shluku)
