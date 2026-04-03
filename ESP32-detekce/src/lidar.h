@@ -3,7 +3,9 @@
 #include <math.h>
 
 #define LIDAR_RX 13
-#define LIDAR_TX 10
+#define LIDAR_TX 10 // TX pin for Serial2, not used but needed for begin()
+
+#define MEM_LIFESPAN_FRAMES 500 // Životnost a doba fixace paměti hlavní stěny v počtu cyklů (20 = cca 2.5 sekundy)
 
 const int PACKET_SIZE = 47;
 uint8_t packet[PACKET_SIZE];
@@ -116,6 +118,17 @@ void init_lidar() {
     Serial2.begin(230400, SERIAL_8N1, LIDAR_RX, LIDAR_TX);
 }
 
+void printStats() {
+    Serial.print("Points in buffer: ");
+    Serial.println(n_pts);
+}
+
+// --- PAMĚŤ DOMINANTNÍ STĚNY ---
+float mem_nx = 0, mem_ny = 0;
+int mem_consistent = 0;
+int mem_miss = 0;
+bool mem_locked = false;
+
 void loop_lidar() {
     while (Serial2.available()) {
         uint8_t c = Serial2.read();
@@ -151,14 +164,14 @@ void loop_lidar() {
         
         // GLOBÁLNÍ ITERATIVNÍ RANSAC: Najde až 3 nejdůležitější dlouhé přímky (do 180st robot z principu víc zdí neuvidí)
         for (int line_idx = 0; line_idx < 3; line_idx++) {
-            if (points_left < 25) break; 
+            if (points_left < 30) break; 
             
             int best_inliers = 0;
             float best_score = 0.0f;
             float best_nx = 0, best_ny = 0, best_c = 0;
             
-            // Nahodíme přes celou hromadu masivních 80 náhodných hádankových přímek pro absolutní jistotu
-            for (int iter = 0; iter < 80; iter++) {
+            // Nahodíme drastických 200 pokusů pro garantované objevení i tence zastoupených stěn bez přeskočení!
+            for (int iter = 0; iter < 200; iter++) {
                 int retries = 0;
                 int i1 = random(0, n_pts);
                 while (pts[i1].used && retries < 15) { i1 = random(0, n_pts); retries++; }
@@ -180,14 +193,20 @@ void loop_lidar() {
                 float nx = -dy / len;
                 float ny = dx / len;
                 
+                // PAMĚŤOVÝ ZÁMEK: Pokud jsme zamčeni na dominantu, natvrdo sledujeme pouze tu!
+                if (line_idx == 0 && mem_locked) {
+                    float dot = abs(nx * mem_nx + ny * mem_ny);
+                    if (dot < 0.85f) continue; // Zaručí neprůstřelné držení žluté stěny, ignorující náhlé fluktuace skóre jinde v poli
+                }
+                
                 // --- ORTOGONÁLNÍ KOREKCE (Geometrie arény) ---
                 // První se vždy najde ta nejvíce nasvícená dominantní stěna. Obě další zbylé stěny 
-                // k ní podle stavby čtverce musí být vždy logicky kolmé nebo rovnoběžné (+- 10 stupňů tolerance)
+                // v témže snímku k ní musí být logicky perfektně kolmé nebo rovnoběžné! (+- 10 stupňů tolerance)
                 if (num_walls > 0) {
                     float dot = abs(nx * walls[0].nx + ny * walls[0].ny);
-                    // Cos(80°) = 0.174, Cos(10°) = 0.984
+                    // Tohle zamezí "šikmým zdem přes soupeře"! Přísná ortogonalizace uvnitř jednoho framu (10 stupňů = 0.984). 
                     if (dot > 0.174f && dot < 0.984f) {
-                        continue; // Šikmá 45° čára směřující bůhvíkde do soupeře se natvrdo odmítne!
+                        continue; // Šikmá čára směřující bůhvíkde do soupeře se natvrdo odmítne!
                     }
                 }
                 
@@ -198,7 +217,7 @@ void loop_lidar() {
                 for (int i = 0; i < n_pts; i++) {
                     if (pts[i].used) continue;
                     float dist = abs(nx * pts[i].x + ny * pts[i].y + c);
-                    if (dist < 40.0f) {
+                    if (dist < 15.0f) { // Zpřísněný offset na pouhých +- 1.5 cm! Kruhový soupeř už neprojde jako rovná záchytná hrana.
                         inliers++;
                         float proj = (-ny) * pts[i].x + (nx) * pts[i].y;
                         if (proj < span_min) span_min = proj;
@@ -209,15 +228,43 @@ void loop_lidar() {
                 float span = span_max - span_min;
                 if (inliers < 2) span = 0.0f; // Bezpečnost
                 
-                // VÝPOČET KOMBINERANÉHO SKÓRE (Prioritizuje masivní délku zdi i její hustotu odrazů)
-                float score = (float)inliers * span;
+                // VÝPOČET OSTRÉHO SKÓRE (Absolutní priorita hustoty. Delší zeď vítězí až při úplné shodě bodů!)
+                float score = (float)inliers * 10000.0f + span;
                 
-                if (inliers > best_inliers) {
-                    best_inliers = inliers; best_nx = nx; best_ny = ny; best_c = c;
+                if (score > best_score) {
+                    best_score = score; best_inliers = inliers; best_nx = nx; best_ny = ny; best_c = c;
                 }
             }
             
-            if (best_inliers < 25) break; 
+            if (best_inliers < 30) {
+                if (line_idx == 0 && mem_locked) {
+                    mem_miss++;
+                    if (mem_miss >= MEM_LIFESPAN_FRAMES) {
+                        mem_locked = false; mem_miss = 0; mem_consistent = 0; // Paměť rozvázána
+                    }
+                }
+                break; 
+            }
+            
+            // --- LOGIKA PAMĚTI (Učení a Sledování stěny) ---
+            if (line_idx == 0) {
+                if (!mem_locked) {
+                    if (mem_consistent == 0) {
+                        mem_nx = best_nx; mem_ny = best_ny; mem_consistent = 1;
+                    } else {
+                        if (abs(best_nx * mem_nx + best_ny * mem_ny) > 0.85f) {
+                            mem_consistent++;
+                            mem_nx = best_nx; mem_ny = best_ny;
+                            if (mem_consistent >= MEM_LIFESPAN_FRAMES) { mem_locked = true; mem_miss = 0; } // Naučeno!
+                        } else {
+                            mem_nx = best_nx; mem_ny = best_ny; mem_consistent = 1; // Šum, začínáme znovu
+                        }
+                    }
+                } else {
+                    mem_miss = 0; // Úspěšně jsme našli paměť, nulujeme čítač omylů
+                    mem_nx = best_nx; mem_ny = best_ny; // Plynulé adaptování na točení robota!
+                }
+            }
             
             // Nyní spočítáme čistou statistiku nalezené stěny (Délka a orientace vektoru)
             float span_min = 999999, span_max = -999999;
@@ -228,7 +275,7 @@ void loop_lidar() {
             for (int i = 0; i < n_pts; i++) {
                 if (pts[i].used) continue;
                 float dist = abs(best_nx * pts[i].x + best_ny * pts[i].y + best_c);
-                if (dist < 40.0f) {
+                if (dist < 15.0f) {
                     pts[i].used = true; // Vymazáno ze světa! Zítřejší stěna 2,3,4 už je neuvidí!
                     points_left--;
                     final_inliers++;
@@ -242,7 +289,7 @@ void loop_lidar() {
                 }
             }
             
-            if (final_inliers < 25) continue; // Přísná ochrana (hustota minimálně 25 naměřených zásahů na stěnu)
+            if (final_inliers < 30) continue; // Přísná ochrana (hustota minimálně 30 naměřených zásahů na stěnu)
             
             // Je struna dlouhá alespoň ze 35 cm nametení? Jinak je to prostě odpad smítka v rohu.
             if ((span_max - span_min) < 350.0f) {
