@@ -124,35 +124,4 @@ void otoc_motorem(int uhel, bool proti_smeru){
   vypni_civky();
 }
 
-// Proměnná "nase_barva", kterou definujeme v main.cpp
-extern char nase_barva;
 
-char urci_barvu_puku(float &r, float &g, float &b) {
-    // Detekce červeného puku (vysoká R složka)
-    if (r > 130 && r > g + 20 && r > b + 20) {
-        return 'R';
-    }
-    // Detekce modrého puku (vyšší B složka a ostatní jsou menší)
-    if (b > 90 && b > r + 15 && b > g + 10) {
-        return 'B';
-    }
-    return 'N'; // Neznámá barva / prázdno (např. cca 114 pro všechny složky)
-}
-
-void roztrid_puk(float &r, float &g, float &b) {
-    char detekovana_barva = urci_barvu_puku(r, g, b);
-    
-    // Pokud systém barvu nepozná (nebo je prázdno), nevykoná nic,
-    // abychom se netočili "v opačném případě" zbytečně na prázdno.
-    if (detekovana_barva == 'N') {
-        return; 
-    }
-
-    if (detekovana_barva == nase_barva) {
-        // Pokud je barva shodná, krokovej motor se otočí o 120° proti směru hod. ručiček
-        otoc_motorem(120, false);
-    } else {
-        // V opačném případě se otočí o 120° po směru hodinových ručiček
-        otoc_motorem(120, true);
-    }
-}
