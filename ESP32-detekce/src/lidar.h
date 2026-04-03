@@ -43,9 +43,8 @@ void processPacket() {
             angle += 360.0f;
         }
         
-        // Filtrace předních 180 stupňů okousaná o dalších 3 stupně tj. celkově 13 stupňů z obou stran (tj. 13° - 167°)
-        // Tím se fyzicky odstřihnou překážky moc vlevo a moc vpravo z obrazu.
-        if (angle >= 13.0f && angle <= 167.0f) {
+        // Filtrace předních 180 stupňů (0 - 180°)
+        if (angle >= 0.0f && angle <= 180.0f) {
             // Rychlé binární odesílání: 6 bajtů = [0xAA, 0x55, angleL, angleH, distL, distH]
             uint8_t buf[6];
             buf[0] = 0xAA;
