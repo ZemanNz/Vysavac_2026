@@ -53,6 +53,16 @@ void send_packet_robot(int16_t x, int16_t y) {
     Serial.write(buf, 9);
 }
 
+void send_packet_opponent(int16_t x, int16_t y) {
+    uint8_t buf[9];
+    buf[0] = 0xBB; buf[1] = 0x55;
+    buf[2] = 3; buf[3] = 4;
+    buf[4] = x & 0xFF;  buf[5] = (x >> 8) & 0xFF;
+    buf[6] = y & 0xFF;  buf[7] = (y >> 8) & 0xFF;
+    buf[8] = buf[2] + buf[3] + buf[4] + buf[5] + buf[6] + buf[7];
+    Serial.write(buf, 9);
+}
+
 void processPacket() {
     uint16_t startAngleX100 = packet[4] | (packet[5] << 8);
     uint16_t endAngleX100 = packet[42] | (packet[43] << 8);
@@ -180,7 +190,7 @@ void loop_lidar() {
                 }
             }
             
-            if (best_inliers < 15) break; 
+            if (best_inliers < 25) break; 
             
             // Nyní spočítáme čistou statistiku nalezené stěny (Délka a orientace vektoru)
             float span_min = 999999, span_max = -999999;
@@ -205,6 +215,8 @@ void loop_lidar() {
                 }
             }
             
+            if (final_inliers < 25) continue; // Přísná ochrana (hustota minimálně 25 naměřených zásahů na stěnu)
+            
             // Je struna dlouhá alespoň ze 35 cm nametení? Jinak je to prostě odpad smítka v rohu.
             if ((span_max - span_min) < 350.0f) {
                 continue; // Odpad (botu/křeslo/vysavač) jsme díky used=true už teď smazali tak či tak, ale PC se o něm nedozví! Nestav se překážkám zdi!
@@ -221,6 +233,25 @@ void loop_lidar() {
             int16_t y2 = rob_y + (int16_t)(avg_y + 1500 * vy);
             
             send_packet_line(x1, y1, x2, y2);
+        }
+
+        // --- DETEKCE SOUPEŘE ZE ZBYTKU BODŮ ---
+        float opp_x = 0, opp_y = 0;
+        int opp_pts = 0;
+        
+        for (int i = 0; i < n_pts; i++) {
+            if (!pts[i].used) {
+                // Slitek veškerého zbylého materiálu
+                opp_x += pts[i].x;
+                opp_y += pts[i].y;
+                opp_pts++;
+            }
+        }
+        
+        if (opp_pts >= 4) { // Je to shluk alespoň 4 bodů (Ne ojedinělý Lidar šum)
+            opp_x /= opp_pts;
+            opp_y /= opp_pts;
+            send_packet_opponent(rob_x + (int16_t)opp_x, rob_y + (int16_t)opp_y);
         }
 
         // Vyčistit lokální pole (nová otáčka zčuchne čistý papír dat)

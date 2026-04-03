@@ -39,6 +39,7 @@ robot_x_mm = 500
 robot_y_mm = 0
 points = []  
 lines = []   
+opponents = []
 
 def to_screen(x_mm, y_mm):
     # Převod MM na pixely obrazovky posunuté o extra 25cm zrcadlovku pro ten tmavý lem arény.
@@ -139,6 +140,12 @@ while running:
                             if 0 <= rx <= 1000 and 0 <= ry <= 1000:
                                 robot_x_mm = rx
                                 robot_y_mm = ry
+                                
+                        elif msg_type == 3 and msg_len == 4:
+                            # Type 3 Detekovaný soupeř (těžiště nepřátelského zbytku shluku)
+                            ox, oy = struct.unpack('<hh', payload)
+                            if -250 <= ox <= 1250 and -250 <= oy <= 1250:
+                                opponents.append((ox, oy, current_time))
                     
                     buffer = buffer[4+msg_len+1:]
                 else:
@@ -174,6 +181,24 @@ while running:
             # Matematické zdi
             pygame.draw.line(screen, col, pos1, pos2, 4)
     lines = new_lines
+    
+    new_opponents = []
+    for opp in opponents:
+        ox, oy, timestamp = opp
+        age = current_time - timestamp
+        # Držíme vizualizaci těžiště protivníka déle (např 250ms), aby neproblikávala
+        if age < 250:
+            new_opponents.append(opp)
+            pos = to_screen(ox, oy)
+            # Velký červený detekční terč + nápis
+            pygame.draw.circle(screen, (255, 30, 30), pos, 15)
+            pygame.draw.circle(screen, (255, 255, 255), pos, 15, 2)
+            try:
+                text = font.render("SOUPEŘ", True, (255, 150, 150))
+                screen.blit(text, (pos[0]+20, pos[1]-10))
+            except:
+                pass
+    opponents = new_opponents
     
     pygame.display.flip()
     clock.tick(60)
