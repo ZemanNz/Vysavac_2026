@@ -39,8 +39,8 @@ static float h_sin_avg = 0.0f, h_cos_avg = 1.0f;
 //   H (heading): 1.0 = okamzita odezva (zadny lag), stabilitu zajistuje Memory Lock
 //   POS (pozice): 0.30 = nova hodnota ma vahu 30%, zbytek je minula
 //   Zvysit ALPHA_POS pro rychlejsi odezvu, snizit pro plynulejsi pohyb
-#define SLAM_ALPHA_H    1.00f
-#define SLAM_ALPHA_POS  0.30f
+#define SLAM_ALPHA_H    0.60f
+#define SLAM_ALPHA_POS  0.50f
 
 // Pamet dominantni steny
 float mem_nx = 0, mem_ny = 0;
