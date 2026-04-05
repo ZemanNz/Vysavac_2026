@@ -5,7 +5,7 @@ const int in1 =  25;
 const int in2 =  26;
 const int in3 =  27;
 const int in4 =  14;
-int rychlost = 1; // vetsi cislo = nizsi rychlost
+int rychlost_us = 1000; // RYCHLOST MOTORU (dříve 800 ms, ale motor hrčel/vibroval). 1000 je bezpečný limit. Větší = pomalejší přesný krok.
 
 void init_stepper(){
     pinMode(in1, OUTPUT);
@@ -19,56 +19,56 @@ void krok1(){
   digitalWrite(in2, LOW);
   digitalWrite(in3, LOW);
   digitalWrite(in4, LOW);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 void krok2(){
   digitalWrite(in1, HIGH);
   digitalWrite(in2, HIGH);
   digitalWrite(in3, LOW);
   digitalWrite(in4, LOW);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 void krok3(){
   digitalWrite(in1, LOW);
   digitalWrite(in2, HIGH);
   digitalWrite(in3, LOW);
   digitalWrite(in4, LOW);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 void krok4(){
   digitalWrite(in1, LOW);
   digitalWrite(in2, HIGH);
   digitalWrite(in3, HIGH);
   digitalWrite(in4, LOW);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 void krok5(){
   digitalWrite(in1, LOW);
   digitalWrite(in2, LOW);
   digitalWrite(in3, HIGH);
   digitalWrite(in4, LOW);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 void krok6(){
   digitalWrite(in1, LOW);
   digitalWrite(in2, LOW);
   digitalWrite(in3, HIGH);
   digitalWrite(in4, HIGH);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 void krok7(){
   digitalWrite(in1, LOW);
   digitalWrite(in2, LOW);
   digitalWrite(in3, LOW);
   digitalWrite(in4, HIGH);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 void krok8(){
   digitalWrite(in1, HIGH);
   digitalWrite(in2, LOW);
   digitalWrite(in3, LOW);
   digitalWrite(in4, HIGH);
-  vTaskDelay(pdMS_TO_TICKS(rychlost));
+  delayMicroseconds(rychlost_us);
 }
 
 void rotacePoSmeru() {

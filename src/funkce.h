@@ -103,6 +103,14 @@ void tridici_vlakno(void *pvParameters) {
     int pocitadlo_puku = 0;
     float r = 0, g = 0, b = 0;
 
+    // První naměřené hodnoty senzoru bezprostředně po jeho zapnutí
+    // bývají občas totální nesmysly (tzv. "garbage readings", např. 255/255/255 nebo 0.6).
+    // Proto ho nejprve necháme 3x změřit barvu jen "na prázdno" a data zahodíme.
+    for (int i = 0; i < 3; i++) {
+        rkColorSensorGetRGB("front", &r, &g, &b);
+        vTaskDelay(pdMS_TO_TICKS(150)); // Malé zpoždění, ať má senzor čas na reakci
+    }
+
     while (true) {
         // Přečtení hodnot ze senzoru přímo ve funkci
         if (rkColorSensorGetRGB("front", &r, &g, &b)) {
@@ -122,8 +130,8 @@ void tridici_vlakno(void *pvParameters) {
                     pocitadlo_puku = 0; // Vynulovat pro další cyklus
                 }
                 
-                // Počkáme 1 sekundu po třídění, než začneme číst nový puk
-                vTaskDelay(pdMS_TO_TICKS(500));
+                // Počkáme chvilku po roztřídění, ať si třídič "oddechne" (sníženo na 100ms z 500ms)
+                vTaskDelay(pdMS_TO_TICKS(100));
             }
         }
         
