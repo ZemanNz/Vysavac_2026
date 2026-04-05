@@ -1,16 +1,30 @@
 #include <Arduino.h>
-#include "lidar.h"
 
-// Ultrazvuky a lasery jsou fyzicky stále ve svých hlavičkových souborech "ultrazvuky.h" a "lasery.h",
-// takže se k nim můžeme kdykoliv v budoucnu vrátit. Pro vizualizaci LiDaru na PC ale 
-// potřebujeme čistý formát sériové linky, takže je tu teď schválně vypínám.
+// ============================================================
+//  Přepínání režimu:
+//    USE_VIZ  1  →  binární výstup pro Python vizualizátor (lidar.h)
+//    USE_VIZ  0  →  textový výstup do Serial Monitoru (lidar_no_viz.h)
+// ============================================================
+#define USE_VIZ  0
+
+#if USE_VIZ
+    #include "lidar.h"
+#else
+    #include "lidar_no_viz.h"
+#endif
 
 void setup() {
-    // Inicializuje Lidar (a změní rychlost baudrate pro Serial0 na 921600 pro PC!)
-    init_lidar();
+    #if USE_VIZ
+        init_lidar();
+    #else
+        init_lidar_nv();
+    #endif
 }
 
 void loop() {
-    // Čte sériovou linku z Lidaru a sype čistá binární data do PC pro vizualizátor
-    loop_lidar();
+    #if USE_VIZ
+        loop_lidar();
+    #else
+        loop_lidar_nv();
+    #endif
 }
