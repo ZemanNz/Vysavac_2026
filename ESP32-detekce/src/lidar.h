@@ -2,6 +2,18 @@
 #include <Arduino.h>
 #include <math.h>
 
+// === Rozměry robota a poloha LiDARu ===
+// LiDAR je fyzický střed SLAM souřadnic – vše se měří od něj
+#define ROBOT_LENGTH_MM   350.0f   // Délka robota (směr vpřed = lokální +Y)
+#define ROBOT_WIDTH_MM    300.0f   // Šířka robota (lokální ±X)
+#define LIDAR_FROM_FRONT   40.0f   // LiDAR je 40 mm od přední hrany
+// Vzdálenosti od LiDARu k okrajům těla robota (lokální souřadnice)
+#define LIDAR_FRONT_EDGE  ( LIDAR_FROM_FRONT)                           // +40 mm
+#define LIDAR_BACK_EDGE   (-(ROBOT_LENGTH_MM - LIDAR_FROM_FRONT))       // -310 mm
+#define LIDAR_HALF_WIDTH  ( ROBOT_WIDTH_MM / 2.0f)                      // ±150 mm
+// Vzdálenost středu robota od LiDARu (pro případné přepočty)
+#define LIDAR_TO_CENTER   (ROBOT_LENGTH_MM / 2.0f - LIDAR_FROM_FRONT)   // 135 mm dozadu
+
 #define LIDAR_RX 13
 #define LIDAR_TX 10
 #define MEM_LIFESPAN_FRAMES 500
@@ -16,8 +28,19 @@ PBuf pts[500];
 int n_pts = 0;
 bool points_ready = false;
 
-// SLAM stav
+// SLAM stav (vyhlazene - odesila se do Pythonu)
 static float g_rx = 500.0f, g_ry = 500.0f, g_h = 0.0f;
+
+// Rohove hodnoty pred vyhlazenem (surove z RANSACu)
+static float raw_rx = 500.0f, raw_ry = 500.0f, raw_h = 0.0f;
+// Pro heading: EMA pres sin/cos - bezpecne pri prechodu +/-180
+static float h_sin_avg = 0.0f, h_cos_avg = 1.0f;
+// Alfa pro EMA vyhlazovani:
+//   H (heading): 1.0 = okamzita odezva (zadny lag), stabilitu zajistuje Memory Lock
+//   POS (pozice): 0.30 = nova hodnota ma vahu 30%, zbytek je minula
+//   Zvysit ALPHA_POS pro rychlejsi odezvu, snizit pro plynulejsi pohyb
+#define SLAM_ALPHA_H    1.00f
+#define SLAM_ALPHA_POS  0.30f
 
 // Pamet dominantni steny
 float mem_nx = 0, mem_ny = 0;
@@ -185,11 +208,16 @@ void loop_lidar() {
         else
             toff = (fgx > 0) ? (PI/2.0f) : (-PI/2.0f);
 
-        // Heading = offset + odchylka foot od "primo vpred"
-        g_h = toff + atan2f(-fx, fy);
+        // Heading = offset + odchylka foot od "primo vpred" (surov, pred EMA)
+        raw_h = toff + atan2f(-fx, fy);
 
-        // Pozice z kazde steny
-        ch = cosf(g_h); sh = sinf(g_h); // prepocet s novym headingem
+        // --- EMA vyhlazeni headingu pres sin/cos ---
+        h_sin_avg = (1.0f - SLAM_ALPHA_H) * h_sin_avg + SLAM_ALPHA_H * sinf(raw_h);
+        h_cos_avg = (1.0f - SLAM_ALPHA_H) * h_cos_avg + SLAM_ALPHA_H * cosf(raw_h);
+        g_h = atan2f(h_sin_avg, h_cos_avg);
+
+        // Pozice z kazde steny (s vyhlazenym headingem)
+        ch = cosf(g_h); sh = sinf(g_h);
         for (int i=0; i<nw; i++) {
             float fix = -walls[i].c * walls[i].nx;
             float fiy = -walls[i].c * walls[i].ny;
@@ -197,13 +225,16 @@ void loop_lidar() {
             float gfx = fix*ch + fiy*sh;
             float gfy = -fix*sh + fiy*ch;
             if (fabsf(gfy) >= fabsf(gfx)) {
-                if (gfy>0) g_ry = ARENA_SIZE - dist; // horni stena Y=1000
-                else       g_ry = dist;               // spodni Y=0
+                if (gfy>0) raw_ry = ARENA_SIZE - dist; // horni stena Y=1000
+                else       raw_ry = dist;               // spodni Y=0
             } else {
-                if (gfx>0) g_rx = ARENA_SIZE - dist; // prava X=1000
-                else       g_rx = dist;               // leva X=0
+                if (gfx>0) raw_rx = ARENA_SIZE - dist; // prava X=1000
+                else       raw_rx = dist;               // leva X=0
             }
         }
+        // EMA vyhlazeni pozice
+        g_rx = (1.0f - SLAM_ALPHA_POS) * g_rx + SLAM_ALPHA_POS * raw_rx;
+        g_ry = (1.0f - SLAM_ALPHA_POS) * g_ry + SLAM_ALPHA_POS * raw_ry;
     }
 
     // === Odeslani vsech dat v globalnich souradnicich ===

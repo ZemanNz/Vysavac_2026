@@ -1,4 +1,5 @@
 import pygame, serial, sys, struct, math
+from collections import deque
 
 PORT     = '/dev/ttyUSB0'
 BAUDRATE = 921600
@@ -26,6 +27,19 @@ except Exception as e:
 rob_x, rob_y, rob_h = 500.0, 500.0, 0.0
 points, lines, opps = [], [], []
 
+# --- Domovska pozice (pravy dolni roh, offsetovano o 300mm od kazde steny) ---
+# Robot je 30x30cm, takze stred musi byt 150mm od steny (+ 150mm rezerva = 300mm)
+HOME_X = 700.0  # 1000 - 300
+HOME_Y = 300.0  # 0   + 300
+
+# --- Trasa robota ---
+# Kazdy prvek: (x, y) v mm souradnicich areny
+PATH_MAX_LEN = 3000          # max pocet ulozenych bodu trasy
+PATH_MIN_MOVE_MM = 5.0       # minimalni pohyb (mm) pro ulozeni bodu
+PATH_MIN_TURN_DEG = 1.0      # minimalni otoceni (°) pro ulozeni bodu
+path_history = deque(maxlen=PATH_MAX_LEN)
+last_path_x, last_path_y, last_path_h = None, None, None
+
 def ts(x, y):
     return (int((x + OFF) * SC), int(WIN - (y + OFF) * SC))
 
@@ -40,19 +54,64 @@ def draw(surf):
     # Hranice areny 1x1m (bile tlusté čáry = "zdi")
     a = [ts(0,0), ts(1000,0), ts(1000,1000), ts(0,1000)]
     pygame.draw.lines(surf, (200,200,200), True, a, 3)
-    # Robot 30x30cm
-    half = 150.0
-    r = math.radians(rob_h)
+
+    # --- Trasa robota (oranžová čára, vykreslena PRED robotem) ---
+    path_pts = list(path_history)
+    if len(path_pts) >= 2:
+        n = len(path_pts)
+        for i in range(1, n):
+            # Fade: starsi body jsou tmavsi (25% az 100% jasu)
+            alpha = 0.25 + 0.75 * (i / n)
+            col = (int(255 * alpha), int(140 * alpha), 0)
+            pygame.draw.line(surf, col, ts(path_pts[i-1][0], path_pts[i-1][1]),
+                             ts(path_pts[i][0],   path_pts[i][1]),   2)
+
+    # Robot 35x30cm – LiDAR je referenční bod (4cm od přední hrany, uprostřed šířky)
+    # Souřadnice rohů RELATIVNĚ k LiDARu v lokálním rámci (Y=vpřed, X=vpravo)
+    #   Přední hrana: +40 mm od LiDARu
+    #   Zadní hrana:  -310 mm od LiDARu  (350 - 40)
+    #   Boční hrany:  ±150 mm
+    r  = math.radians(rob_h)
     cr = math.cos(r); sr = math.sin(r)
+    # (lx=lokální X=vpravo, ly=lokální Y=vpřed)
+    robot_corners_local = [(-150, 40), (150, 40), (150, -310), (-150, -310)]
     corners = []
-    for lx, ly in [(-half,-half),(half,-half),(half,half),(-half,half)]:
-        corners.append(ts(rob_x + lx*cr + ly*sr, rob_y - lx*sr + ly*cr))
+    for lx, ly in robot_corners_local:
+        # Transformace: globální = lidar_pos + lx*pravý + ly*vpřed
+        # Pravý vektor (CW): (cos h, -sin h)  =>  gx += lx*cos, gy -= lx*sin
+        # Vpřed vektor:      (sin h,  cos h)  =>  gx += ly*sin, gy += ly*cos
+        corners.append(ts(rob_x + lx*cr + ly*sr,
+                          rob_y - lx*sr + ly*cr))
     pygame.draw.polygon(surf, (0,120,255), corners, 3)
+    # LiDAR bod (tyrkysová tečka)
     pygame.draw.circle(surf, (0,200,255), ts(rob_x, rob_y), 5)
-    # Sipka (35cm dopredu = lokalni +Y)
-    al = 350.0
-    pygame.draw.line(surf, (0,255,200), ts(rob_x,rob_y),
+    # Šipka vpřed (8 cm = 1/5 původní) od LiDARu
+    al = 80.0
+    pygame.draw.line(surf, (0,255,200), ts(rob_x, rob_y),
                      ts(rob_x + al*sr, rob_y + al*cr), 3)
+
+    # --- Domovska pozice: krizek + navigacni cara ---
+    hp = ts(HOME_X, HOME_Y)
+    # Krizek
+    pygame.draw.line(surf, (0,200,80), (hp[0]-12, hp[1]), (hp[0]+12, hp[1]), 2)
+    pygame.draw.line(surf, (0,200,80), (hp[0], hp[1]-12), (hp[0], hp[1]+12), 2)
+    pygame.draw.circle(surf, (0,255,100), hp, 6, 2)
+    # Zelena cara: robot -> home
+    rp = ts(rob_x, rob_y)
+    pygame.draw.line(surf, (0,255,80), rp, hp, 2)
+    # Vypocet navigace (kompas: H=0 = sever/+Y, CW kladny)
+    dx = HOME_X - rob_x
+    dy = HOME_Y - rob_y
+    dist_mm = math.sqrt(dx*dx + dy*dy)
+    target_h = math.degrees(math.atan2(dx, dy))   # bearing север=0, CW+
+    turn_deg = target_h - rob_h
+    # Normalizace do -180 .. +180
+    while turn_deg >  180: turn_deg -= 360
+    while turn_deg < -180: turn_deg += 360
+    turn_str  = f"{'doleva' if turn_deg < 0 else 'doprava'} {abs(turn_deg):.0f}°"
+    nav_label = f"DOM: otoč {turn_str}  |  jet {dist_mm:.0f} mm"
+    nav_surf  = font.render(nav_label, True, (80,255,130))
+    surf.blit(nav_surf, (10, 30))
     # Info
     surf.blit(font.render(f"X={int(rob_x)} Y={int(rob_y)} H={int(rob_h)}°",
               True, (120,120,120)), (10,10))
@@ -90,6 +149,21 @@ while run:
                 rx,ry,hd = struct.unpack('<hhh', pay)
                 if 0<=rx<=1000 and 0<=ry<=1000:
                     rob_x, rob_y, rob_h = float(rx), float(ry), float(hd)
+                    # --- Zaznam do trasy ---
+                    if last_path_x is None:
+                        # Prvni bod vzdy ulozime
+                        path_history.append((rob_x, rob_y))
+                        last_path_x, last_path_y, last_path_h = rob_x, rob_y, rob_h
+                    else:
+                        dx = rob_x - last_path_x
+                        dy = rob_y - last_path_y
+                        dist = math.sqrt(dx*dx + dy*dy)
+                        d_ang = abs(rob_h - last_path_h)
+                        # Uhel: normalizace do <0, 180>
+                        if d_ang > 180: d_ang = 360 - d_ang
+                        if dist >= PATH_MIN_MOVE_MM or d_ang >= PATH_MIN_TURN_DEG:
+                            path_history.append((rob_x, rob_y))
+                            last_path_x, last_path_y, last_path_h = rob_x, rob_y, rob_h
                 lines.clear(); opps.clear()
             elif mt == 3 and ml == 4:
                 ox,oy = struct.unpack('<hh', pay)
