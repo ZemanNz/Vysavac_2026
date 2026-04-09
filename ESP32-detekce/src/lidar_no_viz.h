@@ -22,6 +22,9 @@
 #define NV_MEM_LIFESPAN_FRAMES 500
 #define NV_ARENA_SIZE 1000.0f
 
+// Korekční odchylka pro fyzické usazení lidaru (jemné ladění zrcadlové osy)
+static float angleOffset = 7.0f;
+
 // --- Pozice "domů" (pravý dolní roh, 30 cm od krajů) ---
 #define HOME_X  700.0f
 #define HOME_Y  300.0f
@@ -74,7 +77,13 @@ static void nv_processPacket() {
     for (int i=0; i<12; i++) {
         uint16_t d = nv_packet[6+i*3]|(nv_packet[7+i*3]<<8);
         float a = s + step*i - 90.0f;
-        while(a>=360) a-=360; while(a<0) a+=360;
+
+        // Kalibrační oprava - fyzické zarovnání natočení
+        a -= angleOffset;
+        // Pojistka na ošetření přetečení (pokud tam zatím žádnou nemáš)
+        while (a >= 360.0f) a -= 360.0f;
+        while (a < 0.0f) a += 360.0f;
+
         if (a>=5 && a<=175 && d>=300 && d<1500 && nv_n_pts<500) {
             float r = a*(PI/180.0f);
             nv_pts[nv_n_pts].x = (int16_t)roundf(d*cosf(r));
