@@ -2478,4 +2478,24 @@ void Motors::handleWebClient() {
     }
 }
 
+bool Motors::rkButton1(bool waitForRelease) {
+    bool isPressed = (digitalRead(Button1) == LOW);
+    if (isPressed && waitForRelease) {
+        while(digitalRead(Button1) == LOW) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+    return isPressed;
+}
+
+bool Motors::rkButton2(bool waitForRelease) {
+    bool isPressed = (digitalRead(Button2) == LOW);
+    if (isPressed && waitForRelease) {
+        while(digitalRead(Button2) == LOW) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+    return isPressed;
+}
+
 }; // namespacer rk

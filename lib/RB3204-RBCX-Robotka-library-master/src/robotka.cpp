@@ -1068,3 +1068,11 @@ void rkUartSend(const void* msg, size_t msgSize) {
     size_t bytesWritten = uartSerial->write((const uint8_t*)msg, msgSize);
     printf("Odesláno %d bytů přes UART\n", bytesWritten);
 }
+
+bool rkButton1(bool waitForRelease) {
+    return gCtx.motors().rkButton1(waitForRelease);
+}
+
+bool rkButton2(bool waitForRelease) {
+    return gCtx.motors().rkButton2(waitForRelease);
+}

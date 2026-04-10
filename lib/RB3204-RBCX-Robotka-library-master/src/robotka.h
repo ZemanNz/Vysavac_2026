@@ -591,16 +591,38 @@ void forward_acc(float mm, float speed);
 void backward_acc(float mm, float speed);
 
 /**
- * \brief Pohyb robota vzad, dokud nenarazí oběma tlačítky na zeď
- * 
- * Timeout je 10 000 ms == 10 sekund, pokud chcete zmenit tak v _librk_motors.cpp v teto funkci zmente int timeoutMs = 10000;
- * 
- * Pokud bylo stisknuto jedno tlacitko na druhe se bude cekat jen 3 sekundy.
- * 
- * Při couváni jede robut s P - regulátorem.
+ * \brief Zjistí, zda je stisknuto vlastní fyzické tlačítko 1 (napojeno na pin z rkConfig.Button1)
+ * \param waitForRelease Přejete-li si po vyhodnocení stisku počkat na puštění tlačítka (výchozí: nepauznout - false)
+ * \return Vrátí `true` pokud je tlačítko stisknuto na hodnotě LOW.
  */
-void back_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button);
-void front_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button);
+bool rkButton1(bool waitForRelease = false);
+
+/**
+ * \brief Zjistí, zda je stisknuto vlastní fyzické tlačítko 2 (napojeno na pin z rkConfig.Button2)
+ * \param waitForRelease Přejete-li si po vyhodnocení stisku počkat na puštění tlačítka (výchozí: nepauznout - false)
+ * \return Vrátí `true` pokud je tlačítko stisknuto na hodnotě LOW.
+ */
+bool rkButton2(bool waitForRelease = false);
+
+/**
+ * \brief Pohyb robota vzad, dokud obě zadané podmínky nevrátí true.
+ * Timeout je 10 sekund. Po stisku prvního se na druhé čeká 3 vteřiny.
+ * Udržuje rovný směr pomocí P-regulátoru a enkodérů.
+ * \param speed Rychlost (0-100), se kterou se bude couvat.
+ * \param first_button Funkce vyhodnocující první stranu (výchozí je konfigurace tlačítek 1)
+ * \param second_button Funkce vyhodnocující druhou stranu (výchozí je konfigurace tlačítek 2)
+ */
+void back_buttons(float speed, std::function<bool()> first_button = []{ return rkButton1(); }, std::function<bool()> second_button = []{ return rkButton2(); });
+
+/**
+ * \brief Pohyb robota vpřed, dokud obě zadané podmínky nevrátí true.
+ * Timeout je 10 sekund. Po stisku prvního se na druhé čeká 3 vteřiny.
+ * Udržuje rovný směr pomocí P-regulátoru a enkodérů.
+ * \param speed Rychlost (0-100) vpřed.
+ * \param first_button Funkce vyhodnocující první stranu (výchozí je konfigurace tlačítek 1)
+ * \param second_button Funkce vyhodnocující druhou stranu (výchozí je konfigurace tlačítek 2)
+ */
+void front_buttons(float speed, std::function<bool()> first_button = []{ return rkButton1(); }, std::function<bool()> second_button = []{ return rkButton2(); });
 
 /**
  * \brief Pohyb robota vpřed, a jede podél zdi pomocí dvou senzorů vzdálenosti

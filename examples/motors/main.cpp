@@ -97,6 +97,8 @@ void loop() {
         Serial.println("3. radius_left(150, 180, 50)");
         rkLedBlue(true);
         radius_left(150, 180, 50);
+
+        front_buttons(40, []{ return rkButton1(); }, []{ return rkButton2(); });
         rkLedBlue(false);
         
         Serial.println("Sequence 4 completed!");
@@ -109,7 +111,7 @@ void loop() {
         Serial.println("1. back_buttons(30)");
         Serial.println("Couvání dokud nenarazí na zeď...");
         rkLedAll(true);
-        back_buttons(30);
+        back_buttons(40);
         rkLedAll(false);
         delay(1000);
         

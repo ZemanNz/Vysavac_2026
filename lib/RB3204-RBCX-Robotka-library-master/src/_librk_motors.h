@@ -69,6 +69,9 @@ public:
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////
     rb::MotorId idLeft() const { return m_id_left; }
     rb::MotorId idRight() const { return m_id_right; }
+
+    bool rkButton2(bool waitForRelease);
+    bool rkButton1(bool waitForRelease);
     
     int16_t pctToSpeed(float pct);
     int32_t mmToTicks(float mm) const;
@@ -117,6 +120,10 @@ private:
     int32_t m_max_speed;
     bool m_polarity_switch_left;
     bool m_polarity_switch_right;
+public:
+    byte getButton1Pin() const { return Button1; }
+    byte getButton2Pin() const { return Button2; }
+private:
     byte Button1;
     byte Button2;
 
