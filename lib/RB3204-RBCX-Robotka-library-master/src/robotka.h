@@ -57,22 +57,22 @@ struct rkPinsConfig {
 struct rkConfig {
     rkConfig()
         : prevod_motoru(1983.3f) // pro 12v ==  41.62486f * 48.f, pro 6v == 1981.3f
-        , left_wheel_diameter(130.0) // v mm
-        , right_wheel_diameter(130.0) // v mm
+        , left_wheel_diameter(61.0) // v mm
+        , right_wheel_diameter(61.0) // v mm
         , roztec_kol(270.0) // v mm
         , konstanta_radius_vnejsi_kolo(1.0f) // Korekční faktor pro vnější kolo při zatáčení
         , konstanta_radius_vnitrni_kolo(1.0f) // Korekční faktor pro vnitřní kolo při zatáčení
-        , korekce_nedotacivosti_left(0.98f)// Korekce nedotáčivosti při otaceni na miste do leva
-        , korekce_nedotacivosti_right(0.99f)// Korekce nedotáčivosti při otaceni na miste do prava
-        , Button1(34)
-        , Button2(35)
+        , korekce_nedotacivosti_left(1.0f)// Korekce nedotáčivosti při otaceni na miste do leva
+        , korekce_nedotacivosti_right(1.0f)// Korekce nedotáčivosti při otaceni na miste do prava
+        , Button1(rb::ButtonId::Left)
+        , Button2(rb::ButtonId::Right)
         , motor_id_left(4)
         , motor_id_right(1)
         , motor_max_power_pct(100)
         , motor_polarity_switch_left(false)
         , motor_polarity_switch_right(true)
         , motor_enable_failsafe(false)
-        , motor_wheel_diameter(130.0)
+        , motor_wheel_diameter(61.0)
         , motor_max_ticks_per_second(5200) // vyzkousite tak ze spustite funkci max_rychlost() a podle toho nastavite
         , motor_max_acceleration(50000)
         , stupid_servo_min(-1.65f)

@@ -6,15 +6,11 @@
 
 
 void otevri_nas(){
-    rkServosSetPosition(4, 10); // Servo 1 nastaví na 90°
-    delay(1200);
-    rkServosSetPosition(4, 0);
+    rkServosSetPosition(4, 80); // Servo 1 nastaví na 90°
 }
 
 void zavri_nas(){
-    rkServosSetPosition(4, -10); // Servo 1 nastaví na 0°
-    delay(1100);
-    rkServosSetPosition(4, 0);
+    rkServosSetPosition(4, 16); // Servo 1 nastaví na 0°
 }
 
 void otevri_souper(){
@@ -37,10 +33,10 @@ void srovnej_trididlo() {
     vypni_civky(); // Povolit cívky, aby motor přestal krokovat
 
 
-    rkServosSetPosition(2, 5);
-    delay(1000);
-    rkServosSetPosition(2, 0);
-    delay(10);
+    rkServosSetPosition(2, 75);
+
+    delay(400);
+
 
     int pocet_kroku = (60 * 64) / 45;
   
@@ -50,11 +46,10 @@ void srovnej_trididlo() {
 
     vypni_civky(); // Povolit cívky, aby motor přestal krokovat
 
-    delay(100);
+    delay(300);
 
-    rkServosSetPosition(2, -10);
-    delay(1000);
     rkServosSetPosition(2, 0);
+
     delay(10);
 }
 

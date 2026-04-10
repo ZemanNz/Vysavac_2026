@@ -16,49 +16,53 @@ void setup() {
     rkSetup(cfg);
     delay(50);
 
-    init_stepper();
+    //init_stepper();
+    // rkServosSetPosition(2, 0);
 
-    pinMode(21, INPUT_PULLUP);
-    pinMode(22, INPUT_PULLUP);
+    // pinMode(21, INPUT_PULLUP);
+    // pinMode(22, INPUT_PULLUP);
     
-    // Zapnout I2C a inicializovat RGB senzor pod aliasem "front"
-    Wire.begin(21, 22, 400000);
-    Wire.setTimeOut(1);
-    rkColorSensorInit("front", Wire, tcs);
+    // // Zapnout I2C a inicializovat RGB senzor pod aliasem "front"
+    // Wire.begin(21, 22, 400000);
+    // Wire.setTimeOut(1);
+    // rkColorSensorInit("front", Wire, tcs);
 
 
     
     
-    // Spuštění třídění v samostatném FreeRTOS vlákně
-    xTaskCreate(
-        tridici_vlakno,    // Funkce, která se má vykonávat (v funkce.h)
-        "TridiciVlakno",   // Textový název pro debugging
-        4096,              // Velikost zásobníku paměti
-        NULL,              // Parametry
-        1,                 // Priorita
-        NULL               // Handle
-    );
+    // // Spuštění třídění v samostatném FreeRTOS vlákně
+    // xTaskCreate(
+    //     tridici_vlakno,    // Funkce, která se má vykonávat (v funkce.h)
+    //     "TridiciVlakno",   // Textový název pro debugging
+    //     4096,              // Velikost zásobníku paměti
+    //     NULL,              // Parametry
+    //     1,                 // Priorita
+    //     NULL               // Handle
+    // );
     
     // Potvrzení rozjezdu tasku rozsvícením zelené LED
     rkLedGreen(true);
 
     while(true) {
         if(rkButtonUp(true)) {
-            forward(2000, 10);
-            break;
+            delay(1000);
+            forward(2000, 60);
+
         }
         if(rkButtonRight(true)) {
-            forward(2000, 20);
-            break;
+            delay(1000);
+            forward(2000, 80);
+
         }
         if(rkButtonDown(true)) {
+            delay(1000);
             srovnej_trididlo();
             // "Break" zde schválně nepíšu, abys mohl srovnat motor několikrát donekonečna,
             // než samotného robota pak odstartuješ přes nějaké jiné tlačítko.
         }
         if(rkButtonLeft(true)) {
-            forward_acc(2000, 20);
-            break;
+            delay(1000);
+            forward_acc(2000, 80);
         }
         delay(50);
     }
