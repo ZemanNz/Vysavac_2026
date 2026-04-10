@@ -175,7 +175,7 @@ void Wifi::handleWebClients_terminal() {
             
         } else if (sscanf(incomingPacket, "back_buttons(%d)", &param1) == 1) {
             printf("🔙 BACK BUTTONS: rychlost=%d\n", param1);
-            back_buttons(param1);
+            back_buttons(param1, []{return false;}, []{return false;});
             
         } else if (sscanf(incomingPacket, "power(%d,%d)", &param1, &param2) == 2) {
             printf("⚡ POWER: levý=%d, pravý=%d\n", param1, param2);

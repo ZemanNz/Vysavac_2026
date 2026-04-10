@@ -48,7 +48,8 @@ public:
     void radius_left(float radius, float angle, float speed);
     void forward_acc(float mm, float speed);
     void backward_acc(float mm, float speed);
-    void back_buttons(float speed);
+    void back_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button);
+    void front_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button);
     void wall_following(float distance_to_drive, float speed, bool automatic_distance_of_wall, float distance_of_wall, bool is_wall_on_right,
                    std::function<int()> first_sensor, 
                    std::function<int()> second_sensor, int o_kolik_je_zadni_dal);

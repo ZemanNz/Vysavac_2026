@@ -44,27 +44,29 @@ void setup() {
     rkLedGreen(true);
 
     while(true) {
+
+
         if(rkButtonUp(true)) {
             delay(1000);
-            forward(2000, 60);
-
-        }
-        if(rkButtonRight(true)) {
-            delay(1000);
-            forward(2000, 80);
-
+            // PŘÍKLAD 1: Jízda dopředu (front_buttons) dokud nenarazí. 
+            // Předáváme lambda funkce []{ return ...; }, které vyhodnotí senzor v každém průchodu.
+            front_buttons(40, []{ return rkButtonUp(); }, []{ return rkButtonDown(); });
         }
         if(rkButtonDown(true)) {
             delay(1000);
-            srovnej_trididlo();
-            // "Break" zde schválně nepíšu, abys mohl srovnat motor několikrát donekonečna,
-            // než samotného robota pak odstartuješ přes nějaké jiné tlačítko.
+            // PŘÍKLAD 2: Couvání (back_buttons) dokud nenarazí
+            // rkButtonLeft() bez argumentu nečeká na puštění (což by uvnitř smyčky robota zaseklo)
+            back_buttons(40, []{ return rkButtonLeft(); }, []{ return rkButtonRight(); });
+        }
+        if(rkButtonRight(true)) {
+            delay(1000);
+            radius_right(150, 180, 60);
         }
         if(rkButtonLeft(true)) {
             delay(1000);
-            forward_acc(2000, 80);
+            srovnej_trididlo();
         }
-        delay(50);
+        delay(500);
     }
 
 }

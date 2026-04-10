@@ -245,8 +245,12 @@ void forward_acc(float mm, float speed){
 void backward_acc(float mm, float speed){
     gCtx.motors().backward_acc(mm, speed);
 }
-void back_buttons(float speed){
-    gCtx.motors().back_buttons(speed);
+void back_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button){
+    gCtx.motors().back_buttons(speed, first_button, second_button);
+}
+
+void front_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button){
+    gCtx.motors().front_buttons(speed, first_button, second_button);
 }
 void wall_following(float distance_to_drive,float speed, bool automatic_distance_of_wall ,float distance_of_wall, bool is_wall_on_right,
                    std::function<uint32_t()> first_sensor, 
@@ -725,7 +729,7 @@ static void processCommand(const String &cmd) {
             Serial.println("Chyba v parametrech back_buttons");
             return;
         }
-        back_buttons(params[0]);
+        back_buttons(params[0], []{return false;}, []{return false;});
         Serial.println("back_buttons zavoláno");
         return;
     }

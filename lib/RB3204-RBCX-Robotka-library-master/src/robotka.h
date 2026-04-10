@@ -60,12 +60,12 @@ struct rkConfig {
         , left_wheel_diameter(61.0) // v mm
         , right_wheel_diameter(61.0) // v mm
         , roztec_kol(270.0) // v mm
-        , konstanta_radius_vnejsi_kolo(1.0f) // Korekční faktor pro vnější kolo při zatáčení
-        , konstanta_radius_vnitrni_kolo(1.0f) // Korekční faktor pro vnitřní kolo při zatáčení
-        , korekce_nedotacivosti_left(1.0f)// Korekce nedotáčivosti při otaceni na miste do leva
-        , korekce_nedotacivosti_right(1.0f)// Korekce nedotáčivosti při otaceni na miste do prava
-        , Button1(rb::ButtonId::Left)
-        , Button2(rb::ButtonId::Right)
+        , konstanta_radius_vnejsi_kolo(0.96f) // Korekční faktor pro vnější kolo při zatáčení
+        , konstanta_radius_vnitrni_kolo(0.96f) // Korekční faktor pro vnitřní kolo při zatáčení
+        , korekce_nedotacivosti_left(0.97f)// Korekce nedotáčivosti při otaceni na miste do leva
+        , korekce_nedotacivosti_right(0.97f)// Korekce nedotáčivosti při otaceni na miste do prava
+        , Button1(NULL)
+        , Button2(NULL)
         , motor_id_left(4)
         , motor_id_right(1)
         , motor_max_power_pct(100)
@@ -599,7 +599,8 @@ void backward_acc(float mm, float speed);
  * 
  * Při couváni jede robut s P - regulátorem.
  */
-void back_buttons(float speed);
+void back_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button);
+void front_buttons(float speed, std::function<bool()> first_button, std::function<bool()> second_button);
 
 /**
  * \brief Pohyb robota vpřed, a jede podél zdi pomocí dvou senzorů vzdálenosti
