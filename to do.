@@ -1,0 +1,42 @@
+plan: 
+
+- esp32 mozek....
+- kdyz lidar uvidi soupere tak rekne zasav...
+- budeme potrebovat asynchroní funkce 
+- na rbcx v jednom vlakne while true na pohyb a v druhym dekod uartu..... ten by dekodoval funkce a zapinal booly na pohyb
+- na esp32 brani dat z lidaru + senzorů + tlacitek .... vypocetpolohy ..... rozhodování co se bude delat () ..... poslani pres uart.....
+- rbcx bude posilat zpet kolik vzal nasich puků..... a pokud ma stisknute predni a zadni tlacitka......... a samotne zapnuti programu....
+
+
+rozhodování : 
+- kdyz bude ve smeru nasi jizdy souper..... zastavujem nebo menime smeru
+- pokud mame vsechny puky vracime se domu
+- pokud cas konci vratime se domů...
+- budeme delat takove lajny...... .excalidraw.png ------------ na zaklade velikosti robota a pozice se bude delat ti lajny.... 
+
+
+postup:
+
+1) prvne udelame rbcx ..... smycka s asynchronima funkcema na pohyb .... 
+- pohyb dopredu kterej se bude spomalovat a zrychlovat a bude se vypinat bud prednima tlacitkama nebo narizenim z esp32 ... a u toho bude tridit puky..... 
+- otoceni o 90 stupnu doprava
+- otoceni o 90 stupnu doleva
+- otoceni o 180 stupnu
+- zacouvani urcitou vzdalenost ... nebo tlacitka, nebo esp .... netridime puky
+- funkce pro vylozeni puků
+- .... kdyztak pridame
+
+2) ty funkce dat do while(true) v jednom lakne na rbcx a podle boolů  je spoustet / zastavovat a nejakym delay
+
+3) sprovoznit uart komunikaci
+- rozpovidat to
+- budem jen posilat stavy promenejch tech bool
+
+4) esp32
+- dodelat nejak vystup ze senzorů
+- vypocitat polohu 
+- sprovoznit uart
+- pak se podle dat rozhodovat --- postupny postup ... po jedne funkci
+- posílat data
+
+5) Testovat a ladit
