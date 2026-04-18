@@ -3,6 +3,7 @@
 #include "robotka.h"
 #include "stepper_motor.h"
 #include "funkce.h"
+#include "asynchroni_pohyb.h"
 
 // Zde se nastaví barva puku, kterou hledáme a sbíráme
 char nase_barva = 'R';
@@ -16,16 +17,14 @@ void setup() {
     rkSetup(cfg);
     delay(50);
 
-    //init_stepper();
-    // rkServosSetPosition(2, 0);
+    init_stepper();
 
-    // pinMode(21, INPUT_PULLUP);
-    // pinMode(22, INPUT_PULLUP);
-    
-    // // Zapnout I2C a inicializovat RGB senzor pod aliasem "front"
-    // Wire.begin(21, 22, 400000);
-    // Wire.setTimeOut(1);
-    // rkColorSensorInit("front", Wire, tcs);
+    // Zapnout I2C a inicializovat RGB senzor
+    pinMode(21, INPUT_PULLUP);
+    pinMode(22, INPUT_PULLUP);
+    Wire.begin(21, 22, 400000);
+    Wire.setTimeOut(1);
+    rkColorSensorInit("front", Wire, tcs);
 
 
     
@@ -64,7 +63,9 @@ void setup() {
         }
         if(rkButtonLeft(true)) {
             delay(1000);
-            srovnej_trididlo();
+            rkLedYellow(true);  // Signalizace: jedeme!
+            jed_a_sbirej(60);  // Jede dopředu na 40%, zastaví se tlačítky Up+Down
+            rkLedYellow(false); // Signalizace: stojíme
         }
         delay(500);
     }
