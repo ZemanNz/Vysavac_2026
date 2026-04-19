@@ -18,7 +18,7 @@ rozhodování :
 postup:
 
 1) prvne udelame rbcx ..... smycka s asynchronima funkcema na pohyb .... 
-- pohyb dopredu kterej se bude spomalovat a zrychlovat a bude se vypinat bud prednima tlacitkama nebo narizenim z esp32 ... a u toho bude tridit puky..... 
+- pohyb dopredu kterej se bude spomalovat a zrychlovat a bude se vypinat bud prednima tlacitkama nebo narizenim z esp32 ... a u toho bude tridit puky..... --- done
 - otoceni o 90 stupnu doprava
 - otoceni o 90 stupnu doleva
 - otoceni o 180 stupnu
