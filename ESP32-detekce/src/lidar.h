@@ -17,7 +17,7 @@
 #define LIDAR_RX 13
 #define LIDAR_TX 10
 #define MEM_LIFESPAN_FRAMES 500
-#define ARENA_SIZE 1000.0f
+#define ARENA_SIZE 1500.0f
 
 // Korekční odchylka pro fyzické usazení lidaru (jemné ladění zrcadlové osy)
 static float angleOffset = 7.0f;

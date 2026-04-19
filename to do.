@@ -23,7 +23,7 @@ postup:
 - otoceni o 90 stupnu doleva
 - otoceni o 180 stupnu
 - zacouvani urcitou vzdalenost ... nebo tlacitka, nebo esp .... netridime puky
-- funkce pro vylozeni puků
+- funkce pro vylozeni puků--- nejlepsi by bylo couvat o ten stupen a vzdalenost a pak otevrit a popojet...
 - .... kdyztak pridame
 
 2) ty funkce dat do while(true) v jednom lakne na rbcx a podle boolů  je spoustet / zastavovat a nejakym delay

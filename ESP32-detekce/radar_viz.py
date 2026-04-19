@@ -1,19 +1,23 @@
 import pygame, serial, sys, struct, math
 from collections import deque
 
-PORT     = '/dev/ttyUSB0'
-BAUDRATE = 921600
-FADE_MS  = 600
-BG       = (15, 15, 15)
+PORT       = '/dev/ttyUSB0'
+BAUDRATE   = 921600
+FADE_MS    = 600
+BG         = (15, 15, 15)
 
-WIN  = 900
-SPAN = 1500.0
-SC   = WIN / SPAN
-OFF  = 250
+# === VELIKOST ARÉNY (mm) — ZMĚŇ TADY ===
+ARENA_SIZE = 1500.0
+
+MARGIN     = ARENA_SIZE * 0.25   # okraj kolem arény pro vizualizaci
+WIN        = 900
+SPAN       = ARENA_SIZE + 2 * MARGIN
+SC         = WIN / SPAN
+OFF        = MARGIN
 
 pygame.init()
 screen = pygame.display.set_mode((WIN, WIN))
-pygame.display.set_caption("LIDAR SLAM – Robot v aréně 1×1 m")
+pygame.display.set_caption(f"LIDAR SLAM – Robot v aréně {ARENA_SIZE/1000:.1f}×{ARENA_SIZE/1000:.1f} m")
 clock = pygame.time.Clock()
 try:    font = pygame.font.SysFont("Courier", 16, bold=True)
 except: font = pygame.font.SysFont(None, 20)
@@ -29,8 +33,8 @@ points, lines, opps = [], [], []
 
 # --- Domovska pozice (pravy dolni roh, offsetovano o 300mm od kazde steny) ---
 # Robot je 30x30cm, takze stred musi byt 150mm od steny (+ 150mm rezerva = 300mm)
-HOME_X = 700.0  # 1000 - 300
-HOME_Y = 300.0  # 0   + 300
+HOME_X = ARENA_SIZE - 300.0  # pravý okraj - 300
+HOME_Y = 300.0               # spodní okraj + 300
 
 # --- Trasa robota ---
 # Kazdy prvek: (x, y) v mm souradnicich areny
@@ -46,13 +50,16 @@ def ts(x, y):
 def draw(surf):
     surf.fill(BG)
     # Mrizka po 100mm
-    for d in range(-2, 13):
+    grid_start = -int(MARGIN / 100)
+    grid_end   = int((ARENA_SIZE + MARGIN) / 100)
+    for d in range(grid_start, grid_end + 1):
         v = d * 100
-        c = (25,25,25) if d<0 or d>10 else (40,40,40)
-        pygame.draw.line(surf, c, ts(v,-250), ts(v,1250), 1)
-        pygame.draw.line(surf, c, ts(-250,v), ts(1250,v), 1)
-    # Hranice areny 1x1m (bile tlusté čáry = "zdi")
-    a = [ts(0,0), ts(1000,0), ts(1000,1000), ts(0,1000)]
+        inside = (0 <= v <= ARENA_SIZE)
+        c = (40,40,40) if inside else (25,25,25)
+        pygame.draw.line(surf, c, ts(v, -MARGIN), ts(v, ARENA_SIZE + MARGIN), 1)
+        pygame.draw.line(surf, c, ts(-MARGIN, v), ts(ARENA_SIZE + MARGIN, v), 1)
+    # Hranice areny (bile tlusté čáry = "zdi")
+    a = [ts(0,0), ts(ARENA_SIZE,0), ts(ARENA_SIZE,ARENA_SIZE), ts(0,ARENA_SIZE)]
     pygame.draw.lines(surf, (200,200,200), True, a, 3)
 
     # --- Trasa robota (oranžová čára, vykreslena PRED robotem) ---
@@ -139,7 +146,7 @@ while run:
         if ((mt + ml + sum(pay)) & 0xFF) == cs:
             if mt == 0 and ml == 4:
                 x, y = struct.unpack('<hh', pay)
-                if -250<=x<=1250 and -250<=y<=1250:
+                if -MARGIN<=x<=ARENA_SIZE+MARGIN and -MARGIN<=y<=ARENA_SIZE+MARGIN:
                     points.append((x, y, now))
             elif mt == 1 and ml == 8:
                 x1,y1,x2,y2 = struct.unpack('<hhhh', pay)
@@ -147,7 +154,7 @@ while run:
                 lines.append((x1,y1,x2,y2,col,now))
             elif mt == 2 and ml == 6:
                 rx,ry,hd = struct.unpack('<hhh', pay)
-                if 0<=rx<=1000 and 0<=ry<=1000:
+                if 0<=rx<=ARENA_SIZE and 0<=ry<=ARENA_SIZE:
                     rob_x, rob_y, rob_h = float(rx), float(ry), float(hd)
                     # --- Zaznam do trasy ---
                     if last_path_x is None:
@@ -167,7 +174,7 @@ while run:
                 lines.clear(); opps.clear()
             elif mt == 3 and ml == 4:
                 ox,oy = struct.unpack('<hh', pay)
-                if -250<=ox<=1250 and -250<=oy<=1250:
+                if -MARGIN<=ox<=ARENA_SIZE+MARGIN and -MARGIN<=oy<=ARENA_SIZE+MARGIN:
                     opps.append((ox,oy,now))
         buf = buf[tot:]
 
