@@ -5,7 +5,7 @@
 //    USE_VIZ  1  →  binární výstup pro Python vizualizátor (lidar.h)
 //    USE_VIZ  0  →  textový výstup do Serial Monitoru (lidar_no_viz.h)
 // ============================================================
-#define USE_VIZ  1
+#define USE_VIZ  0
 
 #if USE_VIZ
     #include "lidar.h"

@@ -20,13 +20,17 @@
 #define NV_LIDAR_RX 13
 #define NV_LIDAR_TX 10
 #define NV_MEM_LIFESPAN_FRAMES 500
-#define NV_ARENA_SIZE 1000.0f
+#define NV_ARENA_SIZE 1500.0f
+
+// === Zorné pole LiDARu (stupně) — které úhly bereme v potaz ===
+#define NV_FOV_MIN   5.0f    // spodní mez (°)
+#define NV_FOV_MAX 175.0f    // horní mez (°)
 
 // Korekční odchylka pro fyzické usazení lidaru (jemné ladění zrcadlové osy)
 static float angleOffset = 7.0f;
 
 // --- Pozice "domů" (pravý dolní roh, 30 cm od krajů) ---
-#define HOME_X  700.0f
+#define HOME_X  (NV_ARENA_SIZE - 300.0f)
 #define HOME_Y  300.0f
 
 // ---- Interní stav (vlastní namespace pomocí nv_ prefixu) ----
@@ -84,7 +88,7 @@ static void nv_processPacket() {
         while (a >= 360.0f) a -= 360.0f;
         while (a < 0.0f) a += 360.0f;
 
-        if (a>=5 && a<=175 && d>=300 && d<1500 && nv_n_pts<500) {
+        if (a>=NV_FOV_MIN && a<=NV_FOV_MAX && d>0 && nv_n_pts<500) {
             float r = a*(PI/180.0f);
             nv_pts[nv_n_pts].x = (int16_t)roundf(d*cosf(r));
             nv_pts[nv_n_pts].y = (int16_t)roundf(d*sinf(r));
@@ -280,12 +284,13 @@ void loop_lidar_nv() {
     while (rel_home > 180.0f)  rel_home -= 360.0f;
     while (rel_home < -180.0f) rel_home += 360.0f;
 
-    // Formát:  POS 452 318 | HEAD -12° | HOME 215mm  35°
-    Serial.printf("POS %4d %4d | HEAD %4d° | HOME %4dmm %4d°",
+    // Formát:  POS 452 318 | HEAD -12° | HOME 215mm  35°R
+    Serial.printf("POS %4d %4d | HEAD %4d° | HOME %4dmm %3d°%c",
         (int)roundf(pos_x), (int)roundf(pos_y),
         (int)roundf(heading_deg),
         (int)roundf(dist_home),
-        (int)roundf(rel_home));
+        (int)roundf(fabsf(rel_home)),
+        rel_home >= 0 ? 'R' : 'L');
 
     if (nv_opp_valid) {
         // Vzdálenost k soupeři
@@ -301,10 +306,11 @@ void loop_lidar_nv() {
         while (rel_angle > 180.0f)  rel_angle -= 360.0f;
         while (rel_angle < -180.0f) rel_angle += 360.0f;
 
-        Serial.printf(" | OPP %4d %4d  dist %4dmm  rel %4d°",
+        Serial.printf(" | OPP %4d %4d  dist %4dmm  %3d°%c",
             (int)roundf(nv_opp_gx), (int)roundf(nv_opp_gy),
             (int)roundf(dist_opp),
-            (int)roundf(rel_angle));
+            (int)roundf(fabsf(rel_angle)),
+            rel_angle >= 0 ? 'R' : 'L');
     }
 
     Serial.println();

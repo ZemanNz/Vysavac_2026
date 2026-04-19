@@ -19,6 +19,10 @@
 #define MEM_LIFESPAN_FRAMES 500
 #define ARENA_SIZE 1500.0f
 
+// === Zorné pole LiDARu (stupně) — které úhly bereme v potaz ===
+#define FOV_MIN   5.0f    // spodní mez (°)
+#define FOV_MAX 175.0f    // horní mez (°)
+
 // Korekční odchylka pro fyzické usazení lidaru (jemné ladění zrcadlové osy)
 static float angleOffset = 7.0f;
 
@@ -109,7 +113,7 @@ void processPacket() {
         while (a >= 360.0f) a -= 360.0f;
         while (a < 0.0f) a += 360.0f;
 
-        if (a>=5 && a<=175 && d>=300 && d<1500 && n_pts<500) {
+        if (a>=FOV_MIN && a<=FOV_MAX && d>0 && n_pts<500) {
             float r = a*(PI/180.0f);
             pts[n_pts].x = (int16_t)roundf(d*cosf(r));
             pts[n_pts].y = (int16_t)roundf(d*sinf(r));
