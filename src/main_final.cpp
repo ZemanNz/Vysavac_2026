@@ -48,10 +48,32 @@ enum CmdID : uint8_t {
 
 // Statusy (RBCX → ESP32)
 enum StatID : uint8_t {
-    STAT_READY        = 0x80,  // Čekám na příkaz
-    STAT_BUSY         = 0x81,  // Vykonávám příkaz
-    STAT_DONE         = 0x82,  // Příkaz dokončen — hotovo, čekám
+    STAT_READY        = 0x80,
+    STAT_BUSY         = 0x81,
+    STAT_DONE         = 0x82,
 };
+
+// Helper: jméno příkazu pro výpis
+const char* cmd_name(uint8_t cmd) {
+    switch(cmd) {
+        case CMD_NOP:        return "NOP";
+        case CMD_STOP:       return "STOP";
+        case CMD_JED_SBIREJ: return "JED_SBIREJ";
+        case CMD_OTOC_VLEVO: return "OTOC_VLEVO";
+        case CMD_OTOC_VPRAVO:return "OTOC_VPRAVO";
+        case CMD_COUVEJ:     return "COUVEJ";
+        case CMD_VYLOZ:      return "VYLOZ";
+        default:             return "???";
+    }
+}
+const char* stav_name(uint8_t s) {
+    switch(s) {
+        case STAT_READY: return "READY";
+        case STAT_BUSY:  return "BUSY";
+        case STAT_DONE:  return "DONE";
+        default:         return "???";
+    }
+}
 
 // =============================================================================
 //  GLOBÁLNÍ STAV
@@ -88,8 +110,6 @@ RbcxStatus sestav_stav(int16_t extra_param = 0) {
 void posli_stav(int16_t extra_param = 0) {
     RbcxStatus s = sestav_stav(extra_param);
     rkUartSend(&s, sizeof(s));
-    Serial.printf("[TX] stav=0x%02X btns=0x%02X puky=%d param=%d\n", 
-        s.status, s.buttons, s.pocet_puku, s.param);
 }
 
 // =============================================================================
@@ -99,30 +119,37 @@ void posli_stav(int16_t extra_param = 0) {
 void uart_vlakno(void *pvParameters) {
     EspCommand cmd;
     unsigned long posledni_stav = 0;
+    unsigned long posledni_serial = 0;
 
     while (true) {
         // --- Příjem příkazů ---
         if (rkUartReceive(&cmd, sizeof(cmd))) {
-            Serial.printf("[RX] cmd=0x%02X param=%d\n", cmd.cmd, cmd.param);
+            Serial.printf("\n>>> UART PRIJEM: %s  param=%d\n", cmd_name(cmd.cmd), cmd.param);
 
             if (cmd.cmd == CMD_NOP) {
-                // Jen dotaz na stav — odpovíme a nic neděláme
                 posli_stav();
             } else {
-                // Jakýkoliv skutečný příkaz → nejdřív zastav co běží
                 zastav_jizdu = true;
-                
-                // Předej hlavní smyčce
                 aktivni_prikaz = cmd.cmd;
                 aktivni_param  = cmd.param;
                 novy_prikaz    = true;
             }
         }
 
-        // --- Periodické odesílání stavu (každých 200ms) ---
+        // --- Periodické odesílání stavu přes UART (každých 200ms) ---
         if (millis() - posledni_stav > 200) {
             posledni_stav = millis();
             posli_stav();
+        }
+
+        // --- Periodický výpis na Serial Monitor (každou 1s) ---
+        auto& btns = rb::Manager::get().buttons();
+        if (millis() - posledni_serial > 1000) {
+            posledni_serial = millis();
+            Serial.printf("[STAV] %s | BTN: U=%d D=%d L=%d R=%d | puky=%d\n",
+                stav_name(aktualni_stav),
+                btns.up(), btns.down(), btns.left(), btns.right(),
+                pocet_nasich_puku);
         }
 
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -165,13 +192,14 @@ void setup() {
             uint8_t cmd = aktivni_prikaz;
             int16_t param = aktivni_param;
 
-            Serial.printf("[MAIN] cmd=0x%02X param=%d\n", cmd, param);
+            Serial.printf("\n========== PRIKAZ: %s  param=%d ==========\n", cmd_name(cmd), param);
 
             switch (cmd) {
 
                 case CMD_STOP:
                     rkMotorsSetPower(0, 0);
                     rkLedYellow(false);
+                    Serial.println(">> Motory zastaveny");
                     aktualni_stav = STAT_DONE;
                     posli_stav();
                     aktualni_stav = STAT_READY;
@@ -181,26 +209,32 @@ void setup() {
                     rkLedYellow(true);
                     zastav_jizdu = false;
                     aktualni_stav = STAT_BUSY;
+                    Serial.printf(">> Jedu dopredu na %d%% a sbiram puky...\n", param);
                     
-                    jed_a_sbirej((float)param);  // Blokující
+                    jed_a_sbirej((float)param);
                     
                     rkLedYellow(false);
+                    Serial.printf(">> Zastaveno. Nasbirano %d nasich puku.\n", pocet_nasich_puku);
                     aktualni_stav = STAT_DONE;
-                    posli_stav();              // Řekni ESP: "hotovo"
+                    posli_stav();
                     aktualni_stav = STAT_READY;
                     break;
 
                 case CMD_OTOC_VLEVO:
                     aktualni_stav = STAT_BUSY;
+                    Serial.printf(">> Otacim se VLEVO o %d stupnu...\n", param);
                     turn_on_spot_left((float)param, 30);
+                    Serial.println(">> Otoceno VLEVO.");
                     aktualni_stav = STAT_DONE;
-                    posli_stav();              // "Otočeno, můžeš poslat další"
+                    posli_stav();
                     aktualni_stav = STAT_READY;
                     break;
 
                 case CMD_OTOC_VPRAVO:
                     aktualni_stav = STAT_BUSY;
+                    Serial.printf(">> Otacim se VPRAVO o %d stupnu...\n", param);
                     turn_on_spot_right((float)param, 30);
+                    Serial.println(">> Otoceno VPRAVO.");
                     aktualni_stav = STAT_DONE;
                     posli_stav();
                     aktualni_stav = STAT_READY;
@@ -208,7 +242,9 @@ void setup() {
 
                 case CMD_COUVEJ:
                     aktualni_stav = STAT_BUSY;
+                    Serial.printf(">> Couvam o %d mm...\n", param);
                     backward_acc((float)param, 40);
+                    Serial.println(">> Couvnuto.");
                     aktualni_stav = STAT_DONE;
                     posli_stav();
                     aktualni_stav = STAT_READY;
@@ -216,10 +252,12 @@ void setup() {
 
                 case CMD_VYLOZ:
                     aktualni_stav = STAT_BUSY;
+                    Serial.println(">> Vykladam puky...");
                     otevri_nas();
                     delay(1000);
                     zavri_nas();
-                    pocet_nasich_puku = 0;     // Vysypali jsme — reset
+                    Serial.printf(">> Vylozeno %d puku. Reset.\n", pocet_nasich_puku);
+                    pocet_nasich_puku = 0;
                     aktualni_stav = STAT_DONE;
                     posli_stav();
                     aktualni_stav = STAT_READY;
@@ -232,18 +270,22 @@ void setup() {
         // === MANUÁLNÍ OVLÁDÁNÍ (testování bez ESP32) ===
         if (rkButtonLeft(true)) {
             delay(500);
+            Serial.println("\n[MANUAL] <<< LEFT >>> jed_a_sbirej(60)");
             zastav_jizdu = false;
             aktualni_stav = STAT_BUSY;
             rkLedYellow(true);
             jed_a_sbirej(60);
             rkLedYellow(false);
+            Serial.println("[MANUAL] Zastaveno.");
             aktualni_stav = STAT_READY;
         }
 
         if (rkButtonRight(true)) {
             delay(500);
+            Serial.println("\n[MANUAL] <<< RIGHT >>> otoc vpravo 90");
             aktualni_stav = STAT_BUSY;
             turn_on_spot_right(90, 30);
+            Serial.println("[MANUAL] Otoceno.");
             aktualni_stav = STAT_READY;
         }
 
