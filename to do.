@@ -43,3 +43,39 @@ postup:
 
 
 
+
+
+
+
+
+
+
+chování : 
+- jak vidis v .excalidraw.png budeme se pohybovat po tech lajnach a sbirat puky , pokud nam nebude v ceste stat souer....
+- nasim cilem neni presne dodrzovat ty lajny, ale proste vysbirat tu plochu pole, chtelo by si nejak pamatovat kde uz jsme to projeli a nejezdit tam znova ale zaroven projed co nejvetsi plochu ---> ty liny jsou jen pro predstavu a ukazatel jak by to bylo bez soupere..... ale kdyz nekde bude souper tak to proste otocime a projedeme to jinama.... proste to sesekneme a a udelame mene tech lajn.... nez vysipeme.... a potom muzeme jet na ta mista kam jsme minule nedojeli a posbirat to tam, ale uz zase nejezdit to co uz jsme jednou posbirali....
+- prvne pojedeme dopredu dokud nenarazime na soupera nebo uz na lidaru uvidime ze jsme moc blizko zd treba 50 cm tak se zastavime (nechceme moc jezdit blizko souerovym stenam)
+- pokud je souper v ceste tak se mu vyhneme otocenim o 90 stupnu doleva a hold nedojedeme na konec lajny a pojedeme doleva do -x
+- prejedeme na druhy konec hriste, bouchneme do zdi, trochu zacouvame, otocime se do leva , trochu popojedem o tu sirku robota a zase se otocime a pojedeme zase dalsi lajnu
+- ted vime ze nepotrebujeme jet az do zdi, protoze tam uz jsme to projeli a tak se zastavime zase o sirku robota predtim zase otocime popojedem o sirku otocime a dalsi lajnu.....
+- a tak dokola dokud nebudem u ty nasi zdi a seberem to kolem ni a jdeme to vylozit...
+- vylozeni probehne: dojedeme do naseho mistecka, otocime se , otevreme zasobniky , a popojedem o kousek dopredu a zase zavreme zasobniky a jedem zase sbirat puky
+- ted budeme potrebovat nejak vedet kde uz jsme byli a jet tam kde jsme jeste nebily...... 
+- pokud zbiva malo casu tak bych jen se zadkem otocil smerem k domovu a jel vzdalenost k domovu az budu v poli tak otevru zasobniky a a zase popojedu a zavru....
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
