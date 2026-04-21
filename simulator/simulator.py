@@ -48,8 +48,8 @@ ARENA_SIZE_MM = 1500.0
 SIRKA_ROBOTA_MM = 300.0
 DELKA_ROBOTA_MM = 350.0
 BEZPECNA_VZDALENOST_ZDI = 200.0
-HOME_X = ARENA_SIZE_MM - 300.0   # 1200 mm — vnitřní roh domovské zóny
-HOME_Y = 300.0                    # 300 mm
+HOME_X = ARENA_SIZE_MM - 500.0   # 1200 mm — vnitřní roh domovské zóny
+HOME_Y = 500.0                    # 300 mm
 
 # Mřížka pokrytí
 BUNKA_MM = SIRKA_ROBOTA_MM
@@ -215,9 +215,13 @@ class SimRbcx:
             self.hotovo = False
             self._popis = f"COUVEJ {param}mm"
         elif cmd == 'VYLOZ':
-            self._timer = 2.0
+            self._timer = 1.0  # čas na otevření
             self.hotovo = False
             self._popis = "VYLOŽ"
+        elif cmd == 'ZAVRI':
+            self._timer = 1.0  # čas na zavření
+            self.hotovo = False
+            self._popis = "ZAVŘI"
 
     def update(self, dt):
         if self.hotovo:
@@ -444,6 +448,10 @@ class Robot:
         self.rbcx.prikaz('VYLOZ')
         self._jedu = False
 
+    def _cmd_zavri(self):
+        self.rbcx.prikaz('ZAVRI')
+        self._jedu = False
+
     # ─── Změna stavu ──────────────────────────────────────
 
     def _zmen(self, novy):
@@ -655,27 +663,40 @@ class Robot:
         elif self.stav == VYHYBAM:
             k = self.krok
             if k == 0:
-                self._cmd_couvej(150)
+                # 1. Natočení po směru dolů
+                if self.nav.smer_doprava:
+                    self._cmd_otoc_vpravo(90)
+                else:
+                    self._cmd_otoc_vlevo(90)
                 self.krok = 1
+
             elif k == 1:
+                # 2. Čekání na dotočení a jízda dolů o šířku robota
                 if self.rbcx.hotovo:
-                    # Otoč dolů — stejný princip jako přechod
-                    if self.nav.smer_doprava:
-                        self._cmd_otoc_vpravo(90)
-                    else:
-                        self._cmd_otoc_vlevo(90)
+                    self._cmd_jed(40)
+                    self._t_krok3 = time.time()
                     self.krok = 2
+
             elif k == 2:
+                # 3. Zastavení po zhruba 300 mm jízdě (odhadem 2 sekundy při 40 %)
+                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:
+                    self._cmd_stop()
+                    self.krok = 3
+
+            elif k == 3:
+                # 4. Vrácení se zpět do původního kurzu
                 if self.rbcx.hotovo:
-                    self.nav.dalsi_lajna()
-                    if self.nav.cislo_lajny >= self.nav.pocet_lajn:
-                        self._log_msg("Všechny lajny hotové → VYKLÁDÁM")
-                        self._cmd_stop()
-                        self._zmen(VYKLADAM)
+                    if self.nav.smer_doprava:
+                        self._cmd_otoc_vlevo(90)
                     else:
-                        self._nastav_cil()
-                        self._cmd_jed(60)
-                        self._zmen(JEDU)
+                        self._cmd_otoc_vpravo(90)
+                    self.krok = 4
+
+            elif k == 4:
+                # 5. Odjezd zpět jako JEDU a pokračování v kurzu
+                if self.rbcx.hotovo:
+                    self._cmd_jed(60)
+                    self._zmen(JEDU)
 
         # ── VRACÍM SE DOMŮ ─────────────────────────────────
         elif self.stav == DOMU:
@@ -706,22 +727,6 @@ class Robot:
                     self.krok = 0  # znovu zamiř
 
         # ── VYKLÁDÁM PUKY ──────────────────────────────────
-        #  Dva scénáře podle směru poslední lajny:
-        #
-        #  A) Šli jsme DOLEVA (←): jsme u levé stěny
-        #     krok 0:  Otoč 180° (tvář k HOME)
-        #     krok 10: Jeď do HOME zóny
-        #     krok 11: → společný dump (krok 30)
-        #
-        #  B) Šli jsme DOPRAVA (→): jsme u pravé stěny, blízko HOME
-        #     krok 0:  Popojet do středu HOME
-        #     krok 20: Otoč vlevo 90° (čelem nahoru)
-        #     krok 21: → společný dump (krok 30)
-        #
-        #  Společný dump:
-        #     krok 30: Otevři zásobníky + popojeď 30cm
-        #     krok 31: Hotovo — puky vyloženy
-        #
         elif self.stav == VYKLADAM:
             k = self.krok
 
@@ -733,9 +738,8 @@ class Robot:
                     self._cmd_otoc_vpravo(180)
                     self.krok = 10
                 else:
-                    # Cesta B: Šli jsme DOPRAVA → popojet do středu HOME
+                    # Cesta B: Šli jsme DOPRAVA → jsme v HOME, rovnou do společné fáze
                     self._log_msg("Vyklad: cesta B (z pravé strany)")
-                    self._cmd_jed(40)
                     self.krok = 20
 
             # === Cesta A: Z levé strany → otočit + dojet do HOME ===
@@ -745,40 +749,58 @@ class Robot:
                     self.krok = 11
 
             elif k == 11:  # Jedeme do HOME zóny
-                if self.x >= ARENA_SIZE_MM - 300:  # vstup do HOME (X=1200)
+                if self.x >= ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI:  # k bezpečné vzdálenosti jako při jízdě lajny
                     self._cmd_stop()
-                    self.krok = 30  # → společný dump
+                    self.krok = 20  # Společně se správně natoč
 
-            # === Cesta B: Z pravé strany → dojet do středu + otočit ===
-            elif k == 20:  # Jedeme do středu HOME
-                if self.x >= ARENA_SIZE_MM - 150:  # střed HOME (X=1350)
-                    self._cmd_stop()
-                    self._cmd_otoc_vlevo(90)  # tvář nahoru (heading 90°→0°)
-                    self.krok = 21
+            # === Společná fáze: Natočení nahoru a dump manévr ===
+            elif k == 20:
+                # Jsme v HOME a koukáme doprava (+X)
+                self._cmd_otoc_vlevo(90)  # tvář nahoru
+                self.krok = 21
 
-            elif k == 21:  # Čekej na otočku vlevo
+            elif k == 21:
                 if self.rbcx.hotovo:
-                    self.krok = 30  # → společný dump
+                    self.krok = 30
 
-            # === Společný dump: otevři + popojeď 30cm ===
-            elif k == 30:  # Otevři zásobníky, popojeď
-                self._log_msg("Zásobníky otevřeny — vykládám...")
-                self._cmd_jed(30)  # pomalá jízda
-                self._t_krok3 = time.time()
+            elif k == 30:
+                self._log_msg("Otevírám zásobníky...")
+                self._cmd_vyloz()
                 self.krok = 31
 
-            elif k == 31:  # Čekáme ~1.5s (cca 30cm při 30% výkonu)
-                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:
+            elif k == 31:
+                if self.rbcx.hotovo:
+                    self._log_msg("Zásobníky otevřeny. Popojíždím 30 cm...")
+                    self._cmd_jed(40)  # pomalá jízda vpřed
+                    self._t_krok3 = time.time()
+                    self.krok = 40
+
+            elif k == 40:
+                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:  # ~30cm
                     self._cmd_stop()
+                    self.krok = 50
+
+            elif k == 50:
+                self._log_msg("Zavírám zásobníky...")
+                self._cmd_zavri()
+                self.krok = 51
+
+            elif k == 51:
+                if self.rbcx.hotovo:
                     self.rbcx.pocet_puku = 0
                     pk = self._pokryto()
                     cel = POCET_BUNEK_X * POCET_BUNEK_Y
                     self._log_msg(f"Puky vyloženy! Pokryto {pk}/{cel}")
-                    self._t_krok3 = None
-                    self.krok = 32  # hotovo
+                    self.krok = 60
 
-            elif k == 32:  # Hotovo — robot stojí v HOME
-                pass  # Čekáme na konec zápasu nebo další instrukce
+            elif k == 60:
+                self._log_msg("═══ PŘIPRAVENA NA DALŠÍ KOLO ═══")
+                self.krok = 61
+
+            elif k == 61:
+                pass  # Čekáme
+
+
 
         # ── NOUZOVÝ NÁVRAT ─────────────────────────────────
         elif self.stav == NOUZOVY:
@@ -870,9 +892,9 @@ class Renderer:
             y = ARENA_Y0 + int(i * BUNKA_MM * MERITKO)
             pygame.draw.line(self.scr, B.GRID_LINE, (ARENA_X0, y), (ARENA_X0+ARENA_PX, y))
 
-        # HOME zóna (pravý dolní roh: X 1200-1500, Y 0-300)
-        hx1, hy1 = self.mm2px(ARENA_SIZE_MM - 300, 0)
-        hx2, hy2 = self.mm2px(ARENA_SIZE_MM, 300)
+        # HOME zóna (pravý dolní roh)
+        hx1, hy1 = self.mm2px(HOME_X, 0)
+        hx2, hy2 = self.mm2px(ARENA_SIZE_MM, HOME_Y)
         hr = pygame.Rect(min(hx1,hx2), min(hy1,hy2),
                          abs(hx2-hx1), abs(hy2-hy1))
         hs = pygame.Surface((hr.w, hr.h), pygame.SRCALPHA)
