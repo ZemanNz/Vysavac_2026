@@ -564,26 +564,24 @@ class Robot:
             if self._naraz():
                 self._cmd_stop()
                 self.rbcx.bump_vpredu = False
-                if self.nav.cislo_lajny + 1 >= self.nav.pocet_lajn:
-                    self._log_msg("Náraz na poslední lajně → VYKLÁDÁM")
-                    self._zmen(VYKLADAM)
-                else:
+                if self.y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0)):
                     self._log_msg("Náraz vpředu → PŘECHOD (s couvním)")
                     self._zmen(PRECHOD)
-                    # krok=0 → začne couváním
+                else:
+                    self._log_msg("Náraz zcela dole → VYKLÁDÁM")
+                    self._zmen(VYKLADAM)
                 return
 
             # [D] Konec lajny (bezpečná vzdálenost)
             if self._na_konci_lajny():
                 self._cmd_stop()
-                if self.nav.cislo_lajny + 1 >= self.nav.pocet_lajn:
-                    self._log_msg(f"Poslední lajna {self.nav.cislo_lajny} hotová → VYKLÁDÁM")
-                    self._zmen(VYKLADAM)
-                else:
-                    self._log_msg(f"Konec lajny {self.nav.cislo_lajny} "
-                                  f"(X={self.x:.0f}) → PŘECHOD")
+                if self.y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0)):
+                    self._log_msg(f"Konec lajny na Y={self.y:.0f} → PŘECHOD")
                     self._zmen(PRECHOD)
                     self.krok = 1  # přeskoč couvání
+                else:
+                    self._log_msg(f"Lajna na dně Y={self.y:.0f} hotová → VYKLÁDÁM")
+                    self._zmen(VYKLADAM)
                 return
 
         # ── PŘECHOD NA DALŠÍ LAJNU ─────────────────────────
@@ -648,16 +646,11 @@ class Robot:
             elif k == 5:  # Hotovo → nová lajna nebo domů
                 if self.rbcx.hotovo:
                     self.nav.dalsi_lajna()
-                    if self.nav.cislo_lajny >= self.nav.pocet_lajn:
-                        self._log_msg("Všechny lajny hotové → VYKLÁDÁM")
-                        self._cmd_stop()
-                        self._zmen(VYKLADAM)
-                    else:
-                        self._nastav_cil()
-                        self._cmd_jed(60)
-                        smer = "→" if self.nav.smer_doprava else "←"
-                        self._log_msg(f"Lajna {self.nav.cislo_lajny}/{self.nav.pocet_lajn} {smer}")
-                        self._zmen(JEDU)
+                    self._nastav_cil()
+                    self._cmd_jed(60)
+                    smer = "→" if self.nav.smer_doprava else "←"
+                    self._log_msg(f"Lajna (smer: {smer})")
+                    self._zmen(JEDU)
 
         # ── VYHÝBÁM SE SOUPEŘI ─────────────────────────────
         elif self.stav == VYHYBAM:
