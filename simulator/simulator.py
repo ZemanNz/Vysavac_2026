@@ -312,6 +312,7 @@ class Robot:
         self.stopa = []
         self.log = []
         self._t_krok3 = None
+        self._c_zbytek = 0.0
 
     # ─── Heading & pozice ────────────────────────────────
 
@@ -806,12 +807,25 @@ class Robot:
                     self._log_msg("Zásobníky otevřeny. Popojíždím 30 cm...")
                     self._cmd_jed(40)  # pomalá jízda vpřed
                     self._t_krok3 = time.time()
+                    self._c_zbytek = 1.5
                     self.krok = 40
 
             elif k == 40:
-                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:  # ~30cm
+                if self._sup_v_ceste():
+                    self._cmd_stop()
+                    self._c_zbytek -= (time.time() - self._t_krok3)
+                    self._log_msg("Soupeř při vykládání! Čekám na uvolnění...")
+                    self.krok = 45
+                elif self._t_krok3 and time.time() - self._t_krok3 > self._c_zbytek:
                     self._cmd_stop()
                     self.krok = 50
+
+            elif k == 45:
+                if not self._sup_v_ceste():
+                    self._log_msg("Soupeř je pryč, pokračuji ve vykládání.")
+                    self._cmd_jed(40)
+                    self._t_krok3 = time.time()
+                    self.krok = 40
 
             elif k == 50:
                 self._log_msg("Zavírám zásobníky...")
@@ -1198,11 +1212,15 @@ def main():
                         robot.sup_on = False
                         robot._log_msg("KLÁVESA: Soupeř odstraněn")
                     else:
-                        r = heading_to_rad(robot.heading)
-                        robot.sup_x = max(0, min(robot.x + math.sin(r)*350, ARENA_SIZE_MM))
-                        robot.sup_y = max(0, min(robot.y + math.cos(r)*350, ARENA_SIZE_MM))
+                        mx, my = pygame.mouse.get_pos()
+                        
+                        rx = (mx - ARENA_X0) / MERITKO
+                        ry = ARENA_SIZE_MM - (my - ARENA_Y0) / MERITKO
+                        
+                        robot.sup_x = max(0, min(rx, ARENA_SIZE_MM))
+                        robot.sup_y = max(0, min(ry, ARENA_SIZE_MM))
                         robot.sup_on = True
-                        robot._log_msg(f"KLÁVESA: Soupeř ({robot.sup_x:.0f}, {robot.sup_y:.0f})")
+                        robot._log_msg(f"KLÁVESA: Soupeř myší ({robot.sup_x:.0f}, {robot.sup_y:.0f})")
 
                 elif ev.key == pygame.K_r:
                     robot = Robot()
