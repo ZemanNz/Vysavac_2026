@@ -563,20 +563,31 @@ void mozek_rozhoduj() {
 
         // [C] Náraz vpředu (tlačítka) → couvni a přejeď na další lajnu
         if (naraz_vpredu()) {
-            Serial.println("[MOZEK] Náraz vpředu → couvám + další lajna");
             posli_prikaz(CMD_STOP);
-            zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
-            // krok=0 → začne couváním
+            if (navigace.cislo_lajny + 1 >= navigace.pocet_lajn) {
+                Serial.println("[MOZEK] Náraz na poslední lajně → DOMŮ");
+                zmen_stav(STAV_VRACIM_SE_DOMU);
+            } else {
+                Serial.println("[MOZEK] Náraz vpředu → couvám + další lajna");
+                zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+                // krok=0 → začne couváním
+            }
             break;
         }
 
-        // [D] Blízko protější zdi (bezpečná vzdálenost) → rovnou otoč
+        // [D] Blízko protější zdi (bezpečná vzdálenost)
         if (dosahli_konce_lajny()) {
-            Serial.printf("[MOZEK] Konec lajny %d (X=%.0f) → PŘECHOD (bez couvání)\n",
-                navigace.cislo_lajny, senzory.pozice_x);
             posli_prikaz(CMD_STOP);
-            zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
-            krok = 1;  // přeskoč couvání, rovnou otoč
+            if (navigace.cislo_lajny + 1 >= navigace.pocet_lajn) {
+                Serial.printf("[MOZEK] Poslední lajna %d hotová → DOMŮ\n",
+                    navigace.cislo_lajny);
+                zmen_stav(STAV_VRACIM_SE_DOMU);
+            } else {
+                Serial.printf("[MOZEK] Konec lajny %d (X=%.0f) → PŘECHOD\n",
+                    navigace.cislo_lajny, senzory.pozice_x);
+                zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+                krok = 1;  // přeskoč couvání
+            }
             break;
         }
 

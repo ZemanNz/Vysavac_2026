@@ -554,20 +554,28 @@ class Robot:
 
             # [C] Náraz vpředu → couvni + přechod
             if self._naraz():
-                self._log_msg("Náraz vpředu → PŘECHOD (s couvním)")
                 self._cmd_stop()
                 self.rbcx.bump_vpredu = False
-                self._zmen(PRECHOD)
-                # krok=0 → začne couvním
+                if self.nav.cislo_lajny + 1 >= self.nav.pocet_lajn:
+                    self._log_msg("Náraz na poslední lajně → DOMŮ")
+                    self._zmen(DOMU)
+                else:
+                    self._log_msg("Náraz vpředu → PŘECHOD (s couvním)")
+                    self._zmen(PRECHOD)
+                    # krok=0 → začne couváním
                 return
 
-            # [D] Konec lajny (bezpečná vzdálenost) → rovnou otoč
+            # [D] Konec lajny (bezpečná vzdálenost)
             if self._na_konci_lajny():
-                self._log_msg(f"Konec lajny {self.nav.cislo_lajny} "
-                              f"(X={self.x:.0f}) → PŘECHOD")
                 self._cmd_stop()
-                self._zmen(PRECHOD)
-                self.krok = 1  # přeskoč couvání, rovnou otoč
+                if self.nav.cislo_lajny + 1 >= self.nav.pocet_lajn:
+                    self._log_msg(f"Poslední lajna {self.nav.cislo_lajny} hotová → DOMŮ")
+                    self._zmen(DOMU)
+                else:
+                    self._log_msg(f"Konec lajny {self.nav.cislo_lajny} "
+                                  f"(X={self.x:.0f}) → PŘECHOD")
+                    self._zmen(PRECHOD)
+                    self.krok = 1  # přeskoč couvání
                 return
 
         # ── PŘECHOD NA DALŠÍ LAJNU ─────────────────────────
