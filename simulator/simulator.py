@@ -52,9 +52,9 @@ HOME_X = ARENA_SIZE_MM - 500.0   # 1200 mm — vnitřní roh domovské zóny
 HOME_Y = 500.0                    # 300 mm
 
 # Mřížka pokrytí
-BUNKA_MM = SIRKA_ROBOTA_MM
-POCET_BUNEK_X = int(ARENA_SIZE_MM / BUNKA_MM)  # 5
-POCET_BUNEK_Y = int(ARENA_SIZE_MM / BUNKA_MM)  # 5
+POCET_BUNEK_X = 10
+POCET_BUNEK_Y = 10
+BUNKA_MM = ARENA_SIZE_MM / 10.0
 
 # Soupeř
 VZDALENOST_SOUPERE_STOP = 400.0
@@ -87,7 +87,7 @@ ARENA_Y0 = (OKNO_VYSKA - ARENA_PX) // 2
 
 GRID_X0 = OKNO_SIRKA // 2 + 60
 GRID_Y0 = 90
-GRID_BUNKA_PX = 80
+GRID_BUNKA_PX = 32
 
 MERITKO = ARENA_PX / ARENA_SIZE_MM  # mm → px
 
@@ -381,8 +381,21 @@ class Robot:
     def _by(self):
         return max(0, min(int(self.y / BUNKA_MM), POCET_BUNEK_Y - 1))
 
+    def _bunka_x_val(self, val):
+        return max(0, min(int(val / BUNKA_MM), POCET_BUNEK_X - 1))
+
+    def _bunka_y_val(self, val):
+        return max(0, min(int(val / BUNKA_MM), POCET_BUNEK_Y - 1))
+
     def _oznac_pokryti(self):
-        self.mapa[self._bx()][self._by()] = True
+        r = SIRKA_ROBOTA_MM / 2.0
+        step = BUNKA_MM / 2.0
+        offs = [-r, -step, 0, step, r]
+        for dx in offs:
+            for dy in offs:
+                bx = self._bunka_x_val(self.x + dx)
+                by = self._bunka_y_val(self.y + dy)
+                self.mapa[bx][by] = True
 
     def _pokryto(self):
         return sum(1 for x in range(POCET_BUNEK_X)
@@ -456,6 +469,8 @@ class Robot:
 
     def _zmen(self, novy):
         self._log_msg(f"STAV: {self.stav} → {novy}")
+        if novy == VYHYBAM:
+            self._stav_po_vyhybani = self.stav
         self.stav = novy
         self.krok = 0
         self._t_krok3 = None
@@ -532,15 +547,40 @@ class Robot:
         elif self.stav == NAJEZD:
             k = self.krok
             if k == 0:
+                # [A] Plný zásobník
+                if self.rbcx.pocet_puku >= PUKY_PLNY_ZASOBNIK:
+                    self._log_msg(f"Plný zásobník ({self.rbcx.pocet_puku}) → DOMŮ")
+                    self._cmd_stop()
+                    self._zmen(DOMU)
+                    return
+
+                # [B] Soupeř v cestě
+                if self._sup_v_ceste():
+                    self._log_msg(f"Soupeř v cestě! ({self._sup_vzd():.0f}mm) → začínám lajny brzy")
+                    self._cmd_stop()
+                    self._cmd_otoc_vlevo(90)
+                    self.krok = 1
+                    return
+
+                # [C] Náraz vpředu
+                if self._naraz():
+                    self._cmd_stop()
+                    self.rbcx.bump_vpredu = False
+                    self._log_msg("Náraz u nájezdu nahoru → otočím na lajnu brzy")
+                    self._cmd_otoc_vlevo(90)
+                    self.krok = 1
+                    return
+
                 # Jedeme nahoru, čekáme na dosažení lajny 0
                 if self.y >= self.nav.lajna_y[0] - SIRKA_ROBOTA_MM / 2:
                     self._cmd_stop()
                     self._cmd_otoc_vlevo(90)  # 0° → -90° (doleva)
                     self.krok = 1
+
             elif k == 1:
                 if self.rbcx.hotovo:
                     self._nastav_cil()
-                    self._cmd_jed(60)
+                    self._cmd_jed(60)  # používá stejný cmd jak jed sbirej
                     self._log_msg(f"Nahoře! Lajna 0 → DOLEVA")
                     self._zmen(JEDU)
 
@@ -689,7 +729,7 @@ class Robot:
                 # 5. Odjezd zpět jako JEDU a pokračování v kurzu
                 if self.rbcx.hotovo:
                     self._cmd_jed(60)
-                    self._zmen(JEDU)
+                    self._zmen(self._stav_po_vyhybani)
 
         # ── VRACÍM SE DOMŮ ─────────────────────────────────
         elif self.stav == DOMU:
