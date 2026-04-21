@@ -263,10 +263,7 @@ class Navigace:
         self.cislo_lajny += 1
         self.smer_doprava = not self.smer_doprava
         self.celkem_lajn += 1
-
-        if self.cislo_lajny >= self.pocet_lajn:
-            self.cislo_lajny = 0
-            self.dokoncena_kola += 1
+        # Ne-wrapujeme! Volající musí zkontrolovat cislo_lajny >= pocet_lajn
 
 
 # =============================================================================
@@ -555,20 +552,22 @@ class Robot:
                 self._zmen(VYHYBAM)
                 return
 
-            # [C] Náraz vpředu
+            # [C] Náraz vpředu → couvni + přechod
             if self._naraz():
-                self._log_msg("Náraz vpředu → PŘECHOD")
+                self._log_msg("Náraz vpředu → PŘECHOD (s couvním)")
                 self._cmd_stop()
                 self.rbcx.bump_vpredu = False
                 self._zmen(PRECHOD)
+                # krok=0 → začne couvním
                 return
 
-            # [D] Konec lajny
+            # [D] Konec lajny (bezpečná vzdálenost) → rovnou otoč
             if self._na_konci_lajny():
                 self._log_msg(f"Konec lajny {self.nav.cislo_lajny} "
                               f"(X={self.x:.0f}) → PŘECHOD")
                 self._cmd_stop()
                 self._zmen(PRECHOD)
+                self.krok = 1  # přeskoč couvání, rovnou otoč
                 return
 
         # ── PŘECHOD NA DALŠÍ LAJNU ─────────────────────────
@@ -630,14 +629,19 @@ class Robot:
                         self._cmd_otoc_vlevo(90)
                     self.krok = 5
 
-            elif k == 5:  # Hotovo → nová lajna
+            elif k == 5:  # Hotovo → nová lajna nebo domů
                 if self.rbcx.hotovo:
                     self.nav.dalsi_lajna()
-                    self._nastav_cil()
-                    self._cmd_jed(60)
-                    smer = "→" if self.nav.smer_doprava else "←"
-                    self._log_msg(f"Lajna {self.nav.cislo_lajny}/{self.nav.pocet_lajn} {smer}")
-                    self._zmen(JEDU)
+                    if self.nav.cislo_lajny >= self.nav.pocet_lajn:
+                        self._log_msg("Všechny lajny hotové → DOMŮ")
+                        self._cmd_stop()
+                        self._zmen(DOMU)
+                    else:
+                        self._nastav_cil()
+                        self._cmd_jed(60)
+                        smer = "→" if self.nav.smer_doprava else "←"
+                        self._log_msg(f"Lajna {self.nav.cislo_lajny}/{self.nav.pocet_lajn} {smer}")
+                        self._zmen(JEDU)
 
         # ── VYHÝBÁM SE SOUPEŘI ─────────────────────────────
         elif self.stav == VYHYBAM:
@@ -656,9 +660,14 @@ class Robot:
             elif k == 2:
                 if self.rbcx.hotovo:
                     self.nav.dalsi_lajna()
-                    self._nastav_cil()
-                    self._cmd_jed(60)
-                    self._zmen(JEDU)
+                    if self.nav.cislo_lajny >= self.nav.pocet_lajn:
+                        self._log_msg("Všechny lajny hotové → DOMŮ")
+                        self._cmd_stop()
+                        self._zmen(DOMU)
+                    else:
+                        self._nastav_cil()
+                        self._cmd_jed(60)
+                        self._zmen(JEDU)
 
         # ── VRACÍM SE DOMŮ ─────────────────────────────────
         elif self.stav == DOMU:

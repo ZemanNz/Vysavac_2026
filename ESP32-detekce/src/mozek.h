@@ -433,23 +433,13 @@ bool dosahli_konce_lajny() {
 }
 
 // Posun na další lajnu (aktualizuj číslo a směr)
+// Ne-wrapujeme! Volající musí zkontrolovat cislo_lajny >= pocet_lajn
 void dalsi_lajna() {
     navigace.cislo_lajny++;
     navigace.smer_doprava = !navigace.smer_doprava;
     navigace.celkem_lajn++;
-
-    // Pokud jsme přejeli všechny lajny, začni nové kolo
-    if (navigace.cislo_lajny >= navigace.pocet_lajn) {
-        navigace.cislo_lajny = 0;
-        navigace.dokoncena_kola++;
-        Serial.printf("[NAV] === NOVÉ KOLO #%d ===\n", navigace.dokoncena_kola);
-    }
-
-    Serial.printf("[NAV] Lajna %d/%d  smer=%s  Y=%.0f\n",
-        navigace.cislo_lajny, navigace.pocet_lajn,
-        navigace.smer_doprava ? "DOPRAVA" : "DOLEVA",
-        navigace.lajna_y[navigace.cislo_lajny]);
 }
+
 
 // =============================================================================
 //  ROZHODOVACÍ LOGIKA — STAVOVÝ AUTOMAT
@@ -576,15 +566,17 @@ void mozek_rozhoduj() {
             Serial.println("[MOZEK] Náraz vpředu → couvám + další lajna");
             posli_prikaz(CMD_STOP);
             zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+            // krok=0 → začne couváním
             break;
         }
 
-        // [D] Blízko protější zdi (SLAM říká že jsme na konci) → další lajna
+        // [D] Blízko protější zdi (bezpečná vzdálenost) → rovnou otoč
         if (dosahli_konce_lajny()) {
-            Serial.printf("[MOZEK] Konec lajny %d (X=%.0f) → PŘECHOD\n",
+            Serial.printf("[MOZEK] Konec lajny %d (X=%.0f) → PŘECHOD (bez couvání)\n",
                 navigace.cislo_lajny, senzory.pozice_x);
             posli_prikaz(CMD_STOP);
             zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+            krok = 1;  // přeskoč couvání, rovnou otoč
             break;
         }
 
@@ -647,12 +639,18 @@ void mozek_rozhoduj() {
                     krok = 5;
                 }
                 break;
-            case 5:  // Hotovo → nová lajna
+            case 5:  // Hotovo → nová lajna nebo domů
                 if (rbcx_hotovo()) {
                     dalsi_lajna();
-                    nastav_cil_lajny();
-                    posli_prikaz(CMD_JED_SBIREJ, 60);
-                    zmen_stav(STAV_JEDU_LAJNU);
+                    if (navigace.cislo_lajny >= navigace.pocet_lajn) {
+                        Serial.println("[MOZEK] Všechny lajny hotové → DOMŮ");
+                        posli_prikaz(CMD_STOP);
+                        zmen_stav(STAV_VRACIM_SE_DOMU);
+                    } else {
+                        nastav_cil_lajny();
+                        posli_prikaz(CMD_JED_SBIREJ, 60);
+                        zmen_stav(STAV_JEDU_LAJNU);
+                    }
                 }
                 break;
         }
@@ -683,12 +681,16 @@ void mozek_rozhoduj() {
                 break;
             case 2:
                 if (rbcx_hotovo()) {
-                    // Přejedeme na další lajnu — neotáčíme se zpět,
-                    // prostě přeskočíme zbytek aktuální lajny
                     dalsi_lajna();
-                    nastav_cil_lajny();
-                    posli_prikaz(CMD_JED_SBIREJ, 60);
-                    zmen_stav(STAV_JEDU_LAJNU);
+                    if (navigace.cislo_lajny >= navigace.pocet_lajn) {
+                        Serial.println("[MOZEK] Všechny lajny hotové → DOMŮ");
+                        posli_prikaz(CMD_STOP);
+                        zmen_stav(STAV_VRACIM_SE_DOMU);
+                    } else {
+                        nastav_cil_lajny();
+                        posli_prikaz(CMD_JED_SBIREJ, 60);
+                        zmen_stav(STAV_JEDU_LAJNU);
+                    }
                 }
                 break;
         }
