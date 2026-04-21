@@ -158,6 +158,7 @@ struct LajnovaNavigace {
 
 enum StavRobota : uint8_t {
     STAV_CEKAM_NA_START,            // Čekáme na startovní signál
+    STAV_NAJEZD_NAHORU,             // Vertikalí nájezd z HOME nahoru po pravé straně
     STAV_JEDU_LAJNU,                // Jedeme po lajně — sbíráme puky
     STAV_PRECHOD_NA_DALSI_LAJNU,    // Otáčíme se + posouváme na další lajnu
     STAV_VYHYBAM_SE_SOUPERI,        // Soupeř v cestě — vyhýbací manévr
@@ -169,6 +170,7 @@ enum StavRobota : uint8_t {
 const char* jmeno_stavu(StavRobota s) {
     switch(s) {
         case STAV_CEKAM_NA_START:         return "CEKAM_NA_START";
+        case STAV_NAJEZD_NAHORU:          return "NAJEZD_NAHORU";
         case STAV_JEDU_LAJNU:             return "JEDU_LAJNU";
         case STAV_PRECHOD_NA_DALSI_LAJNU: return "PRECHOD_LAJNY";
         case STAV_VYHYBAM_SE_SOUPERI:     return "VYHYBAM_SE";
@@ -387,15 +389,17 @@ void vypis_mapu_pokryti() {
 void inicializuj_lajny() {
     // Lajny jdou shora dolů, každá má šířku SIRKA_ROBOTA
     // Lajna 0 = nahoře (soupeřova strana), poslední = dole (naše strana)
+    // Robot nejdříve vyjede nahoru po pravé straně, pak zig-zaguje dolů.
     navigace.pocet_lajn = (int)(NV_ARENA_SIZE / SIRKA_ROBOTA_MM);
     for (int i = 0; i < navigace.pocet_lajn; i++) {
         // Střed lajny: od horní zdi dolů
         navigace.lajna_y[i] = NV_ARENA_SIZE - (i + 0.5f) * SIRKA_ROBOTA_MM;
     }
 
-    // Začínáme od lajny 0, směr doprava
+    // Začínáme od lajny 0 (nahoře), směr doleva
+    // (robot přijel nahoru po pravé straně, první lajna jede doleva)
     navigace.cislo_lajny = 0;
-    navigace.smer_doprava = true;
+    navigace.smer_doprava = false;
     navigace.celkem_lajn = 0;
     navigace.dokoncena_kola = 0;
 
@@ -509,9 +513,34 @@ void mozek_rozhoduj() {
         // Až přijde signál:
         //   cas_startu = millis();
         //   inicializuj_lajny();
-        //   nastav_cil_lajny();
-        //   posli_prikaz(CMD_JED_SBIREJ, 60);
-        //   zmen_stav(STAV_JEDU_LAJNU);
+        //   posli_prikaz(CMD_JED_SBIREJ, 60);  // jeď nahoru
+        //   zmen_stav(STAV_NAJEZD_NAHORU);
+        break;
+
+    // ──────────────────────────────────────────────────────
+    //  NÁJEZD NAHORU
+    //  Robot startuje v HOME (pravý dolní roh) a jede vertikálně
+    //  nahoru po pravé straně arény (heading=0° = +Y).
+    //  Když Y dosáhne horní lajny → otoč doleva → JEDU_LAJNU
+    // ──────────────────────────────────────────────────────
+    case STAV_NAJEZD_NAHORU:
+        switch (krok) {
+            case 0:
+                // Jedeme nahoru — čekáme než Y dosáhne lajny 0 (nahoře)
+                if (senzory.pozice_y >= navigace.lajna_y[0] - SIRKA_ROBOTA_MM / 2.0f) {
+                    posli_prikaz(CMD_STOP);
+                    posli_prikaz(CMD_OTOC_VLEVO, 90);  // 0° → -90° (doleva)
+                    krok = 1;
+                }
+                break;
+            case 1:
+                if (rbcx_hotovo()) {
+                    nastav_cil_lajny();
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    zmen_stav(STAV_JEDU_LAJNU);
+                }
+                break;
+        }
         break;
 
     // ──────────────────────────────────────────────────────
@@ -577,9 +606,15 @@ void mozek_rozhoduj() {
                 posli_prikaz(CMD_COUVEJ, 100);
                 krok = 1;
                 break;
-            case 1:  // Čekej na dokončení couvání
+            case 1:  // Čekej na dokončení couvání → otoč DOLŮ
                 if (rbcx_hotovo()) {
-                    posli_prikaz(CMD_OTOC_VLEVO, 90);
+                    // Otáčíme podle směru jízdy aby robot šel vždy DOLŮ:
+                    //   doleva  → VLEVO  (heading klesá → tváří se dolů)
+                    //   doprava → VPRAVO (heading roste → tváří se dolů)
+                    if (navigace.smer_doprava)
+                        posli_prikaz(CMD_OTOC_VPRAVO, 90);
+                    else
+                        posli_prikaz(CMD_OTOC_VLEVO, 90);
                     krok = 2;
                 }
                 break;
@@ -603,9 +638,12 @@ void mozek_rozhoduj() {
                     }
                 }
                 break;
-            case 4:  // Druhé otočení
+            case 4:  // Druhé otočení (stejný směr — tváříme se na novou lajnu)
                 if (rbcx_hotovo()) {
-                    posli_prikaz(CMD_OTOC_VLEVO, 90);
+                    if (navigace.smer_doprava)
+                        posli_prikaz(CMD_OTOC_VPRAVO, 90);
+                    else
+                        posli_prikaz(CMD_OTOC_VLEVO, 90);
                     krok = 5;
                 }
                 break;
@@ -622,11 +660,11 @@ void mozek_rozhoduj() {
 
     // ──────────────────────────────────────────────────────
     //  VYHÝBÁM SE SOUPEŘI
-    //  Soupeř stojí v cestě → zkrátíme lajnu, otočíme doleva
-    //  a přejedeme na další.
+    //  Soupeř stojí v cestě → zkrátíme lajnu, otočíme nahoru
+    //  a přeskočíme na další lajnu.
     //    krok 0: Couvni 150mm
-    //    krok 1: Otoč doleva 90°
-    //    krok 2: Jeď k protější zdi (nová zkrácená lajna v -X)
+    //    krok 1: Otoč nahoru 90° (vlevo/vpravo podle směru)
+    //    krok 2: Pokračuj na další lajně
     // ──────────────────────────────────────────────────────
     case STAV_VYHYBAM_SE_SOUPERI:
         switch (krok) {
@@ -636,7 +674,10 @@ void mozek_rozhoduj() {
                 break;
             case 1:
                 if (rbcx_hotovo()) {
-                    posli_prikaz(CMD_OTOC_VLEVO, 90);
+                    if (navigace.smer_doprava)
+                        posli_prikaz(CMD_OTOC_VPRAVO, 90);
+                    else
+                        posli_prikaz(CMD_OTOC_VLEVO, 90);
                     krok = 2;
                 }
                 break;
