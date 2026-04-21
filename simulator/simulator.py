@@ -671,6 +671,17 @@ class Robot:
                     self.krok = 3
 
             elif k == 3:  # Popojíždíme o šířku robota (~2s)
+                if self._sup_v_ceste():
+                    self._cmd_stop()
+                    self._log_msg("Soupeř na přechodu! Vracím se starou lajnou zpět.")
+                    if self.nav.smer_doprava:
+                        self._cmd_otoc_vpravo(90)
+                    else:
+                        self._cmd_otoc_vlevo(90)
+                    self.nav.smer_doprava = not self.nav.smer_doprava
+                    self.krok = 10
+                    return
+
                 if self._t_krok3 and time.time() - self._t_krok3 > 2.0:
                     self._cmd_stop()
                     self._t_krok3 = None
@@ -691,6 +702,12 @@ class Robot:
                     self._cmd_jed(60)
                     smer = "→" if self.nav.smer_doprava else "←"
                     self._log_msg(f"Lajna (smer: {smer})")
+                    self._zmen(JEDU)
+
+            elif k == 10: # Dokončení otočky pro krok zpět
+                if self.rbcx.hotovo:
+                    self._nastav_cil()
+                    self._cmd_jed(60)
                     self._zmen(JEDU)
 
         # ── VYHÝBÁM SE SOUPEŘI ─────────────────────────────
