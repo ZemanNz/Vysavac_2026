@@ -565,8 +565,8 @@ void mozek_rozhoduj() {
         if (naraz_vpredu()) {
             posli_prikaz(CMD_STOP);
             if (navigace.cislo_lajny + 1 >= navigace.pocet_lajn) {
-                Serial.println("[MOZEK] Náraz na poslední lajně → DOMŮ");
-                zmen_stav(STAV_VRACIM_SE_DOMU);
+                Serial.println("[MOZEK] Náraz na poslední lajně → VYKLÁDÁM");
+                zmen_stav(STAV_VYKLADAM_PUKY);
             } else {
                 Serial.println("[MOZEK] Náraz vpředu → couvám + další lajna");
                 zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
@@ -579,9 +579,9 @@ void mozek_rozhoduj() {
         if (dosahli_konce_lajny()) {
             posli_prikaz(CMD_STOP);
             if (navigace.cislo_lajny + 1 >= navigace.pocet_lajn) {
-                Serial.printf("[MOZEK] Poslední lajna %d hotová → DOMŮ\n",
+                Serial.printf("[MOZEK] Poslední lajna %d hotová → VYKLÁDÁM\n",
                     navigace.cislo_lajny);
-                zmen_stav(STAV_VRACIM_SE_DOMU);
+                zmen_stav(STAV_VYKLADAM_PUKY);
             } else {
                 Serial.printf("[MOZEK] Konec lajny %d (X=%.0f) → PŘECHOD\n",
                     navigace.cislo_lajny, senzory.pozice_x);
@@ -654,9 +654,9 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     dalsi_lajna();
                     if (navigace.cislo_lajny >= navigace.pocet_lajn) {
-                        Serial.println("[MOZEK] Všechny lajny hotové → DOMŮ");
+                        Serial.println("[MOZEK] Všechny lajny hotové → VYKLÁDÁM");
                         posli_prikaz(CMD_STOP);
-                        zmen_stav(STAV_VRACIM_SE_DOMU);
+                        zmen_stav(STAV_VYKLADAM_PUKY);
                     } else {
                         nastav_cil_lajny();
                         posli_prikaz(CMD_JED_SBIREJ, 60);
@@ -694,9 +694,9 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     dalsi_lajna();
                     if (navigace.cislo_lajny >= navigace.pocet_lajn) {
-                        Serial.println("[MOZEK] Všechny lajny hotové → DOMŮ");
+                        Serial.println("[MOZEK] Všechny lajny hotové → VYKLÁDÁM");
                         posli_prikaz(CMD_STOP);
-                        zmen_stav(STAV_VRACIM_SE_DOMU);
+                        zmen_stav(STAV_VYKLADAM_PUKY);
                     } else {
                         nastav_cil_lajny();
                         posli_prikaz(CMD_JED_SBIREJ, 60);
@@ -753,27 +753,75 @@ void mozek_rozhoduj() {
 
     // ──────────────────────────────────────────────────────
     //  VYKLÁDÁM PUKY
-    //  Doma → otevři zásobníky → popojeď → zavři → zpět sbírat
-    //    krok 0: CMD_VYLOZ → čekej na DONE
-    //    krok 1: Hotovo → zpět na SEARCH
+    //  Dva scénáře podle směru poslední lajny:
+    //    A) DOLEVA: otoč 180°, jeď do HOME, dump
+    //    B) DOPRAVA: popojet do středu HOME, otoč vlevo, dump
+    //  Společný dump: otevři zásobníky + popojeď 30cm
     // ──────────────────────────────────────────────────────
     case STAV_VYKLADAM_PUKY:
         switch (krok) {
-            case 0:
-                posli_prikaz(CMD_VYLOZ);
-                krok = 1;
-                break;
-            case 1:
-                if (rbcx_hotovo()) {
-                    Serial.printf("[MOZEK] Vyloženo! Jedu sbírat dál. (kolo %d, pokryto %d/%d)\n",
-                        navigace.dokoncena_kola,
-                        POCET_BUNEK_X * POCET_BUNEK_Y - nepokrytych_bunek(),
-                        POCET_BUNEK_X * POCET_BUNEK_Y);
-                    // Po vyložení jedem na nepokrytá místa
-                    nastav_cil_lajny();
-                    posli_prikaz(CMD_JED_SBIREJ, 60);
-                    zmen_stav(STAV_JEDU_LAJNU);
+            case 0:  // Urči cestu
+                if (!navigace.smer_doprava) {
+                    // Cesta A: Šli jsme DOLEVA → jsme u levé stěny
+                    Serial.println("[MOZEK] Vyklad: cesta A (z levé strany)");
+                    posli_prikaz(CMD_OTOC_VPRAVO, 180);  // otoč k HOME
+                    krok = 10;
+                } else {
+                    // Cesta B: Šli jsme DOPRAVA → blízko HOME
+                    Serial.println("[MOZEK] Vyklad: cesta B (z pravé strany)");
+                    posli_prikaz(CMD_JED_SBIREJ, 40);  // popojet do středu HOME
+                    krok = 20;
                 }
+                break;
+
+            // === Cesta A: Z levé strany ===
+            case 10:  // Čekej na 180°
+                if (rbcx_hotovo()) {
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    krok = 11;
+                }
+                break;
+            case 11:  // Jedeme do HOME zóny
+                if (senzory.pozice_x >= NV_ARENA_SIZE - 300.0f) {
+                    posli_prikaz(CMD_STOP);
+                    krok = 30;  // → společný dump
+                }
+                break;
+
+            // === Cesta B: Z pravé strany ===
+            case 20:  // Jedeme do středu HOME
+                if (senzory.pozice_x >= NV_ARENA_SIZE - 150.0f) {
+                    posli_prikaz(CMD_STOP);
+                    posli_prikaz(CMD_OTOC_VLEVO, 90);  // tvář nahoru
+                    krok = 21;
+                }
+                break;
+            case 21:
+                if (rbcx_hotovo()) {
+                    krok = 30;  // → společný dump
+                }
+                break;
+
+            // === Společný dump: otevři + popojeď 30cm ===
+            case 30: {
+                posli_prikaz(CMD_VYLOZ);  // otevře zásobníky
+                posli_prikaz(CMD_JED_SBIREJ, 30);  // pomalá jízda
+                static unsigned long cas_dump = 0;
+                cas_dump = millis();
+                krok = 31;
+                break;
+            }
+            case 31: {
+                static unsigned long cas_dump;
+                if (millis() - cas_dump > 1500) {  // ~30cm
+                    posli_prikaz(CMD_STOP);
+                    Serial.println("[MOZEK] Puky vyloženy!");
+                    krok = 32;
+                }
+                break;
+            }
+            case 32:  // Hotovo
+                // Robot stojí v HOME, zápas pokračuje nebo končí
                 break;
         }
         break;

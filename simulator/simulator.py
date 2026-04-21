@@ -557,8 +557,8 @@ class Robot:
                 self._cmd_stop()
                 self.rbcx.bump_vpredu = False
                 if self.nav.cislo_lajny + 1 >= self.nav.pocet_lajn:
-                    self._log_msg("Náraz na poslední lajně → DOMŮ")
-                    self._zmen(DOMU)
+                    self._log_msg("Náraz na poslední lajně → VYKLÁDÁM")
+                    self._zmen(VYKLADAM)
                 else:
                     self._log_msg("Náraz vpředu → PŘECHOD (s couvním)")
                     self._zmen(PRECHOD)
@@ -569,8 +569,8 @@ class Robot:
             if self._na_konci_lajny():
                 self._cmd_stop()
                 if self.nav.cislo_lajny + 1 >= self.nav.pocet_lajn:
-                    self._log_msg(f"Poslední lajna {self.nav.cislo_lajny} hotová → DOMŮ")
-                    self._zmen(DOMU)
+                    self._log_msg(f"Poslední lajna {self.nav.cislo_lajny} hotová → VYKLÁDÁM")
+                    self._zmen(VYKLADAM)
                 else:
                     self._log_msg(f"Konec lajny {self.nav.cislo_lajny} "
                                   f"(X={self.x:.0f}) → PŘECHOD")
@@ -641,9 +641,9 @@ class Robot:
                 if self.rbcx.hotovo:
                     self.nav.dalsi_lajna()
                     if self.nav.cislo_lajny >= self.nav.pocet_lajn:
-                        self._log_msg("Všechny lajny hotové → DOMŮ")
+                        self._log_msg("Všechny lajny hotové → VYKLÁDÁM")
                         self._cmd_stop()
-                        self._zmen(DOMU)
+                        self._zmen(VYKLADAM)
                     else:
                         self._nastav_cil()
                         self._cmd_jed(60)
@@ -669,9 +669,9 @@ class Robot:
                 if self.rbcx.hotovo:
                     self.nav.dalsi_lajna()
                     if self.nav.cislo_lajny >= self.nav.pocet_lajn:
-                        self._log_msg("Všechny lajny hotové → DOMŮ")
+                        self._log_msg("Všechny lajny hotové → VYKLÁDÁM")
                         self._cmd_stop()
-                        self._zmen(DOMU)
+                        self._zmen(VYKLADAM)
                     else:
                         self._nastav_cil()
                         self._cmd_jed(60)
@@ -706,20 +706,79 @@ class Robot:
                     self.krok = 0  # znovu zamiř
 
         # ── VYKLÁDÁM PUKY ──────────────────────────────────
+        #  Dva scénáře podle směru poslední lajny:
+        #
+        #  A) Šli jsme DOLEVA (←): jsme u levé stěny
+        #     krok 0:  Otoč 180° (tvář k HOME)
+        #     krok 10: Jeď do HOME zóny
+        #     krok 11: → společný dump (krok 30)
+        #
+        #  B) Šli jsme DOPRAVA (→): jsme u pravé stěny, blízko HOME
+        #     krok 0:  Popojet do středu HOME
+        #     krok 20: Otoč vlevo 90° (čelem nahoru)
+        #     krok 21: → společný dump (krok 30)
+        #
+        #  Společný dump:
+        #     krok 30: Otevři zásobníky + popojeď 30cm
+        #     krok 31: Hotovo — puky vyloženy
+        #
         elif self.stav == VYKLADAM:
             k = self.krok
+
+            # === Krok 0: Urči cestu ===
             if k == 0:
-                self._cmd_vyloz()
-                self.krok = 1
-            elif k == 1:
+                if not self.nav.smer_doprava:
+                    # Cesta A: Šli jsme DOLEVA → otoč se 180° k HOME
+                    self._log_msg("Vyklad: cesta A (z levé strany)")
+                    self._cmd_otoc_vpravo(180)
+                    self.krok = 10
+                else:
+                    # Cesta B: Šli jsme DOPRAVA → popojet do středu HOME
+                    self._log_msg("Vyklad: cesta B (z pravé strany)")
+                    self._cmd_jed(40)
+                    self.krok = 20
+
+            # === Cesta A: Z levé strany → otočit + dojet do HOME ===
+            elif k == 10:  # Čekej na 180° otočku
                 if self.rbcx.hotovo:
+                    self._cmd_jed(60)
+                    self.krok = 11
+
+            elif k == 11:  # Jedeme do HOME zóny
+                if self.x >= ARENA_SIZE_MM - 300:  # vstup do HOME (X=1200)
+                    self._cmd_stop()
+                    self.krok = 30  # → společný dump
+
+            # === Cesta B: Z pravé strany → dojet do středu + otočit ===
+            elif k == 20:  # Jedeme do středu HOME
+                if self.x >= ARENA_SIZE_MM - 150:  # střed HOME (X=1350)
+                    self._cmd_stop()
+                    self._cmd_otoc_vlevo(90)  # tvář nahoru (heading 90°→0°)
+                    self.krok = 21
+
+            elif k == 21:  # Čekej na otočku vlevo
+                if self.rbcx.hotovo:
+                    self.krok = 30  # → společný dump
+
+            # === Společný dump: otevři + popojeď 30cm ===
+            elif k == 30:  # Otevři zásobníky, popojeď
+                self._log_msg("Zásobníky otevřeny — vykládám...")
+                self._cmd_jed(30)  # pomalá jízda
+                self._t_krok3 = time.time()
+                self.krok = 31
+
+            elif k == 31:  # Čekáme ~1.5s (cca 30cm při 30% výkonu)
+                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:
+                    self._cmd_stop()
+                    self.rbcx.pocet_puku = 0
                     pk = self._pokryto()
                     cel = POCET_BUNEK_X * POCET_BUNEK_Y
-                    self._log_msg(f"Vyloženo! Pokryto {pk}/{cel}")
-                    self.rbcx.pocet_puku = 0
-                    self._nastav_cil()
-                    self._cmd_jed(60)
-                    self._zmen(JEDU)
+                    self._log_msg(f"Puky vyloženy! Pokryto {pk}/{cel}")
+                    self._t_krok3 = None
+                    self.krok = 32  # hotovo
+
+            elif k == 32:  # Hotovo — robot stojí v HOME
+                pass  # Čekáme na konec zápasu nebo další instrukce
 
         # ── NOUZOVÝ NÁVRAT ─────────────────────────────────
         elif self.stav == NOUZOVY:
