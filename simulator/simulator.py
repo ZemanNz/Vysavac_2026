@@ -48,8 +48,8 @@ ARENA_SIZE_MM = 1500.0
 SIRKA_ROBOTA_MM = 300.0
 DELKA_ROBOTA_MM = 350.0
 BEZPECNA_VZDALENOST_ZDI = 200.0
-HOME_X = ARENA_SIZE_MM - 500.0   # 1200 mm — vnitřní roh domovské zóny
-HOME_Y = 500.0                    # 300 mm
+HOME_X = ARENA_SIZE_MM - 250.0   # Střed domovské zóny: 1250 mm
+HOME_Y = 250.0                    # Střed domovské zóny: 250 mm
 
 # Mřížka pokrytí
 POCET_BUNEK_X = 10
@@ -753,29 +753,40 @@ class Robot:
         elif self.stav == DOMU:
             k = self.krok
             if k == 0:
-                if self._domov_uhel() > 10.0:
-                    uhel = int(self._domov_uhel())
-                    if self._domov_smer() == 'L':
-                        self._cmd_otoc_vlevo(uhel)
-                    else:
+                rel = self._domov_uhel_rel()
+                # Chceme couvat, tedy natočit k domovu záda -> přičteme 180° k úhlu k domovu
+                rel_zacouvani = normalize_heading(rel - 180)
+                
+                if abs(rel_zacouvani) > 10.0:
+                    uhel = int(abs(rel_zacouvani))
+                    if rel_zacouvani >= 0:
                         self._cmd_otoc_vpravo(uhel)
+                    else:
+                        self._cmd_otoc_vlevo(uhel)
                     self.krok = 1
                 else:
                     self.krok = 2
+
             elif k == 1:
                 if self.rbcx.hotovo:
                     self.krok = 2
+
             elif k == 2:
-                self._cmd_jed(70)
+                # K couvani pouzijeme CMD_COUVEJ o celou zbyvajici vzalenost
+                self._cmd_couvej(int(self._domov_vzd()))
                 self.krok = 3
+
             elif k == 3:
                 if self._domov_vzd() < 150.0:
-                    self._log_msg("Jsme doma!")
+                    self._log_msg("Jsme zacouvani doma!")
                     self._cmd_stop()
                     self._zmen(VYKLADAM)
-                elif self._domov_uhel() > 30.0:
-                    self._cmd_stop()
-                    self.krok = 0  # znovu zamiř
+                    self.krok = 30  # přeskoč otáčení, jsme nacouvaní
+                else:
+                    rel = normalize_heading(self._domov_uhel_rel() - 180)
+                    if abs(rel) > 20.0:  # drift korekce pro couvání
+                        self._cmd_stop()
+                        self.krok = 0  # znovu zamiř
 
         # ── VYKLÁDÁM PUKY ──────────────────────────────────
         elif self.stav == VYKLADAM:
@@ -957,8 +968,8 @@ class Renderer:
             pygame.draw.line(self.scr, B.GRID_LINE, (ARENA_X0, y), (ARENA_X0+ARENA_PX, y))
 
         # HOME zóna (pravý dolní roh)
-        hx1, hy1 = self.mm2px(HOME_X, 0)
-        hx2, hy2 = self.mm2px(ARENA_SIZE_MM, HOME_Y)
+        hx1, hy1 = self.mm2px(ARENA_SIZE_MM - 500, 0)
+        hx2, hy2 = self.mm2px(ARENA_SIZE_MM, 500)
         hr = pygame.Rect(min(hx1,hx2), min(hy1,hy2),
                          abs(hx2-hx1), abs(hy2-hy1))
         hs = pygame.Surface((hr.w, hr.h), pygame.SRCALPHA)
