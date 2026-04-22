@@ -143,7 +143,6 @@ PRECHOD  = 'PRECHOD_LAJNY'
 VYHYBAM  = 'VYHYBAM_SE'
 DOMU     = 'VRACIM_DOMU'
 VYKLADAM = 'VYKLADAM'
-SROVNEJ  = 'SROVNEJ_SE'
 NOUZOVY  = 'NOUZOVY_NAVRAT'
 
 STAV_BARVA_MAP = {
@@ -154,7 +153,6 @@ STAV_BARVA_MAP = {
     VYHYBAM:  B.STAV['VYHYB'],
     DOMU:     B.STAV['DOMU'],
     VYKLADAM: B.STAV['VYKLAM'],
-    SROVNEJ:  (255, 160, 50),
     NOUZOVY:  B.STAV['NOUZOV'],
 }
 
@@ -365,6 +363,19 @@ class Robot:
         angle_sup = math.degrees(math.atan2(dx, dy))
         rel = normalize_heading(angle_sup - self.heading)
         return vzd < VZDALENOST_SOUPERE_STOP and abs(rel) < UHEL_SOUPERE_VPRED
+
+    def _sup_vSmeru(self, target_heading, max_dist=VZDALENOST_SOUPERE_STOP, fov=UHEL_SOUPERE_VPRED):
+        """Podívá se teoretickým senzorem (LiDARem) zadaným směrem, jestli tam není soupeř."""
+        if not self.sup_on:
+            return False
+        dx = self.sup_x - self.x
+        dy = self.sup_y - self.y
+        vzd = math.sqrt(dx*dx + dy*dy)
+        if vzd > max_dist:
+            return False
+        angle_sup = math.degrees(math.atan2(dx, dy))
+        rel = normalize_heading(angle_sup - target_heading)
+        return abs(rel) < fov
 
     def _sup_vzd(self):
         if not self.sup_on:
@@ -652,6 +663,15 @@ class Robot:
             k = self.krok
 
             if k == 0:  # Couvni
+                # Ošetření: podíváme se LiDAREM předtím, než začneme přechod (směr 180° = dolů)
+                # Abychom se vyhnuli tomu, že se otočíme a teprve pak zjistíme, že pod námi je soupeř.
+                if self._sup_vSmeru(180.0, max_dist=500.0, fov=45.0):
+                    self._log_msg("Lidar vidí soupeře pod námi! Otáčím se starou lajnou zpět.")
+                    self.nav.smer_doprava = not self.nav.smer_doprava
+                    self._cmd_otoc_vlevo(180)  # rovnou přejezd do starého směru
+                    self.krok = 10
+                    return
+
                 self._cmd_couvej(100)
                 self.krok = 1
 
@@ -676,18 +696,20 @@ class Robot:
                 if self._sup_v_ceste():
                     self._cmd_stop()
                     self._log_msg("Soupeř na přechodu! Vracím se starou lajnou zpět.")
-                    if self.nav.smer_doprava:
-                        self._cmd_otoc_vpravo(90)
-                    else:
-                        self._cmd_otoc_vlevo(90)
+                    self._cmd_otoc_vlevo(180)
                     self.nav.smer_doprava = not self.nav.smer_doprava
                     self.krok = 10
                     return
 
+                # Uplynul čas základního přejezdu lajny?
                 if self._t_krok3 and time.time() - self._t_krok3 > 2.0:
-                    self._cmd_stop()
-                    self._t_krok3 = None
-                    self.krok = 4
+                    tar_h = -90.0 if self.nav.smer_doprava else 90.0
+                    # Pokud v nové lajně není soupeř, můžeme zatočit.
+                    # Pokud tam je, podmínka neprojde a robot POKRAČUJE dál v jízdě dolů!
+                    if not self._sup_vSmeru(tar_h, max_dist=1500.0, fov=45.0):
+                        self._cmd_stop()
+                        self._t_krok3 = None
+                        self.krok = 4
 
             elif k == 4:  # Druhé otočení (stejný směr)
                 if self.rbcx.hotovo:
@@ -716,6 +738,14 @@ class Robot:
         elif self.stav == VYHYBAM:
             k = self.krok
             if k == 0:
+                # Chceme zajet do další lajny - je to volné?
+                if self._sup_vSmeru(180.0, max_dist=500.0, fov=45.0):
+                    self._log_msg("Lidar vidí soupeře pod námi! Vracím se starou lajnou.")
+                    self.nav.smer_doprava = not self.nav.smer_doprava
+                    self._cmd_otoc_vlevo(180)
+                    self.krok = 10
+                    return
+
                 # 1. Natočení po směru dolů
                 if self.nav.smer_doprava:
                     self._cmd_otoc_vpravo(90)
@@ -732,9 +762,22 @@ class Robot:
 
             elif k == 2:
                 # 3. Zastavení po zhruba 300 mm jízdě (odhadem 2 sekundy při 40 %)
-                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:
+                if self._sup_v_ceste():
                     self._cmd_stop()
-                    self.krok = 3
+                    self._log_msg("Soupeř se připletl do úhybu! Vracím se starou lajnou.")
+                    self._cmd_otoc_vlevo(180)
+                    self.nav.smer_doprava = not self.nav.smer_doprava
+                    self.krok = 10
+                    return
+
+                # Uplynul čas minimálního vyhýbacího manévru (1.5s)?
+                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:
+                    tar_h = 90.0 if self.nav.smer_doprava else -90.0
+                    # Pokud se už můžeme vrátit k původnímu směru, otočíme se.
+                    # Jinak pokračujeme v únikovém kurzu dolů.
+                    if not self._sup_vSmeru(tar_h, max_dist=1500.0, fov=45.0):
+                        self._cmd_stop()
+                        self.krok = 3
 
             elif k == 3:
                 # 4. Vrácení se zpět do původního kurzu
@@ -750,6 +793,13 @@ class Robot:
                 if self.rbcx.hotovo:
                     self._cmd_jed(60)
                     self._zmen(self._stav_po_vyhybani)
+
+            elif k == 10:
+                # Alternativní únik: soupeř pod námi
+                if self.rbcx.hotovo:
+                    self._nastav_cil()
+                    self._cmd_jed(60)
+                    self._zmen(JEDU)
 
         # ── VRACÍM SE DOMŮ ─────────────────────────────────
         elif self.stav == DOMU:
@@ -783,7 +833,7 @@ class Robot:
                     self._log_msg("Jsme zacouvani doma!")
                     self._cmd_stop()
                     self._zmen(VYKLADAM)
-                    self.krok = 30  # přeskoč otáčení, jsme nacouvaní
+                    self.krok = 21  # jdeme na krok srovnání
                 else:
                     rel = normalize_heading(self._domov_uhel_rel() - 180)
                     if abs(rel) > 20.0:  # drift korekce pro couvání
@@ -824,6 +874,19 @@ class Robot:
                 self.krok = 21
 
             elif k == 21:
+                if self.rbcx.hotovo:
+                    self._log_msg("Srovnávám orientaci (LiDAR na 0.0°)...")
+                    h_err = normalize_heading(self.heading)
+                    if abs(h_err) > 0.5:
+                        if h_err > 0:
+                            self._cmd_otoc_vlevo(abs(h_err))
+                        else:
+                            self._cmd_otoc_vpravo(abs(h_err))
+                        self.krok = 22
+                    else:
+                        self.krok = 30
+
+            elif k == 22:
                 if self.rbcx.hotovo:
                     self.krok = 30
 
@@ -871,16 +934,8 @@ class Robot:
                     self.krok = 60
 
             elif k == 60:
-                self._log_msg("Puky vyloženy! SROVNÁVÁM SE...")
-                self._zmen(SROVNEJ)
-
-        # ── SROVNÁNÍ PODLE STĚNY ───────────────────────────
-        elif self.stav == SROVNEJ:
-            self._log_msg("Srovnávám orientaci (LiDAR / 0.0°)...")
-            self.heading = 0.0
-            self._zmen(CEKAM)
-
-
+                self._log_msg("═══ PŘIPRAVENA NA DALŠÍ KOLO ═══")
+                self._zmen(CEKAM)
 
         # ── NOUZOVÝ NÁVRAT ─────────────────────────────────
         elif self.stav == NOUZOVY:

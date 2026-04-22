@@ -167,7 +167,6 @@ enum StavRobota : uint8_t {
     STAV_VYHYBAM_SE_SOUPERI,        // Soupeř v cestě — vyhýbací manévr
     STAV_VRACIM_SE_DOMU,            // Navigace k domácí zóně
     STAV_VYKLADAM_PUKY,             // Vyložení puků doma
-    STAV_SROVNAVANI,                // Srovnání podle pravé stěny
     STAV_NOUZOVY_NAVRAT,            // Čas končí — řítíme se domů
 };
 
@@ -180,7 +179,6 @@ const char* jmeno_stavu(StavRobota s) {
         case STAV_VYHYBAM_SE_SOUPERI:     return "VYHYBAM_SE";
         case STAV_VRACIM_SE_DOMU:         return "VRACIM_DOMU";
         case STAV_VYKLADAM_PUKY:          return "VYKLADAM";
-        case STAV_SROVNAVANI:             return "SROVNAVANI";
         case STAV_NOUZOVY_NAVRAT:         return "NOUZOVY_NAVRAT";
         default:                          return "???";
     }
@@ -822,7 +820,7 @@ void mozek_rozhoduj() {
                     // Jsme zacouvaní doma!
                     posli_prikaz(CMD_STOP);
                     zmen_stav(STAV_VYKLADAM_PUKY);
-                    krok = 30; // Přeskočíme otáčení (Cesta A/B), jsme připravení
+                    krok = 21; // Místo přeskočení jdeme na krok 21 (srovnání)
                 } else {
                     // Kontrola driftu:
                     float dx = HOME_X - senzory.pozice_x;
@@ -886,6 +884,24 @@ void mozek_rozhoduj() {
 
             case 21:
                 if (rbcx_hotovo()) {
+                    // Místo čekání rovnou provedeme jemnou korekci orientace
+                    float h_err = senzory.heading;
+                    if (abs(h_err) > 0.5f) {
+                        Serial.println("[MOZEK] Srovnávám orientaci před vyložením...");
+                        if (h_err > 0)
+                            posli_prikaz(CMD_OTOC_VLEVO, (int16_t)h_err);
+                        else
+                            posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)abs(h_err));
+                        krok = 22;
+                    } else {
+                        krok = 30;
+                    }
+                }
+                break;
+
+            case 22:
+                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Orientace srovnána (0.0°).");
                     krok = 30;
                 }
                 break;
@@ -947,45 +963,8 @@ void mozek_rozhoduj() {
 
             case 34:  // Čekej na zavření
                 if (rbcx_hotovo()) {
-                    Serial.println("[MOZEK] Puky vyloženy! SROVNÁVÁM SE...");
-                    zmen_stav(STAV_SROVNAVANI); 
-                }
-                break;
-        }
-        break;
-
-    // ──────────────────────────────────────────────────────
-    //  SROVNÁVÁNÍ PODLE STĚNY
-    //  Robot se po vykládání srovná podle pravé stěny (+X).
-    //    krok 0: Otoč se doprava o 90° (směr ke zdi)
-    //    krok 1: Čekej na dotočení
-    //    krok 2: Jeď pomalu ke zdi
-    //    krok 3: Sleduj náraz nebo X pozici
-    //    krok 4: Couvni na X=1250
-    //    krok 5: Čekej na zacouvání
-    //    krok 6: Otoč se doleva o 90° (zpět nahoru)
-    //    krok 7: Hotovo → ČEKÁM_NA_START
-    // ──────────────────────────────────────────────────────
-    case STAV_SROVNAVANI:
-        switch (krok) {
-            case 0: {
-                // Srovnání pouze rotací na 0° (nahoru)
-                float h_err = senzory.heading;
-                if (abs(h_err) > 0.5f) {
-                    if (h_err > 0)
-                        posli_prikaz(CMD_OTOC_VLEVO, (int16_t)h_err);
-                    else
-                        posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)abs(h_err));
-                    krok = 1;
-                } else {
-                    zmen_stav(STAV_CEKAM_NA_START);
-                }
-                break;
-            }
-            case 1:
-                if (rbcx_hotovo()) {
-                    Serial.println("[MOZEK] ═══ ORIENTACE SROVNÁNA ═══");
-                    zmen_stav(STAV_CEKAM_NA_START);
+                    Serial.println("[MOZEK] Puky vyloženy! ═══ PŘIPRAVENA NA DALŠÍ KOLO ═══");
+                    zmen_stav(STAV_CEKAM_NA_START); 
                 }
                 break;
         }
