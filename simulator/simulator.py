@@ -64,7 +64,7 @@ UHEL_SOUPERE_VPRED = 45.0
 PUKY_PLNY_ZASOBNIK = 5
 
 # Čas
-DELKA_ZAPASU_S = 90.0
+DELKA_ZAPASU_S = 180.0
 CAS_NOUZOVEHO_NAVRATU_S = 10.0
 
 # Simulační rychlosti
@@ -144,6 +144,8 @@ VYHYBAM  = 'VYHYBAM_SE'
 DOMU     = 'VRACIM_DOMU'
 VYKLADAM = 'VYKLADAM'
 NOUZOVY  = 'NOUZOVY_NAVRAT'
+PRESUN_Y = 'PRESUN_Y'
+PRESUN_X = 'PRESUN_X'
 
 STAV_BARVA_MAP = {
     CEKAM:    B.STAV['CEKAM'],
@@ -268,6 +270,47 @@ class Navigace:
         self.smer_doprava = not self.smer_doprava
         self.celkem_lajn += 1
         # Ne-wrapujeme! Volající musí zkontrolovat cislo_lajny >= pocet_lajn
+
+    def vypocti_dalsi_cil(self, mapa, startovane_z_home=False):
+        """Prozkoumá mapu 10x10 a najde největší nevyčištěný úsek na standardních lajnách Y."""
+        nej_delka = 0
+        nej_usek = None
+        nej_lajna = -1
+
+        for i in range(self.pocet_lajn):
+            y_mm = self.lajna_y[i]
+            by = min(POCET_BUNEK_Y - 1, int(y_mm / BUNKA_MM))
+            
+            # Najdeme sekvence prázdných (nevybarvených) buněk (False)
+            delka_sekvence = 0
+            start_x_idx = -1
+            
+            for x_idx in range(POCET_BUNEK_X):
+                if not mapa[x_idx][by]:
+                    if delka_sekvence == 0:
+                        start_x_idx = x_idx
+                    delka_sekvence += 1
+                else:
+                    if delka_sekvence > nej_delka:
+                        nej_delka = delka_sekvence
+                        nej_usek = (start_x_idx, x_idx - 1)
+                        nej_lajna = i
+                    delka_sekvence = 0
+            
+            # Dotazení sekvence na konci lajny (pravý okraj)
+            if delka_sekvence > nej_delka:
+                nej_delka = delka_sekvence
+                nej_usek = (start_x_idx, POCET_BUNEK_X - 1)
+                nej_lajna = i
+
+        if nej_usek is None or nej_delka == 0:
+            return None # Vše pokryto
+        
+        sx, ex = nej_usek
+        start_x_mm = sx * BUNKA_MM + BUNKA_MM / 2
+        end_x_mm = ex * BUNKA_MM + BUNKA_MM / 2
+        
+        return (start_x_mm, end_x_mm, self.lajna_y[nej_lajna], nej_lajna)
 
 
 # =============================================================================
@@ -631,6 +674,17 @@ class Robot:
             # [D] Konec lajny (bezpečná vzdálenost)
             if self._na_konci_lajny():
                 self._cmd_stop()
+                if getattr(self, 'dynamicky_rezim', False):
+                    self._log_msg("Dynamický úsek dokončen.")
+                    cil = self.nav.vypocti_dalsi_cil(self.mapa)
+                    if cil:
+                        self.dyn_start_x, self.dyn_end_x, self.dyn_y, _ = cil
+                        self._zmen(PRESUN_Y)
+                    else:
+                        self._log_msg("Mapa zcela vyčištěna! -> DOMŮ")
+                        self._zmen(DOMU)
+                    return
+
                 if self.y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0)):
                     self._log_msg(f"Konec lajny na Y={self.y:.0f} → PŘECHOD")
                     self._zmen(PRECHOD)
@@ -801,6 +855,89 @@ class Robot:
                 if self.rbcx.hotovo:
                     self._nastav_cil()
                     self._cmd_jed(60)
+                    self._zmen(JEDU)
+
+        # ── DYNAMICKÝ PŘESUN Osa Y ─────────────────────────────────
+        elif self.stav == PRESUN_Y:
+            k = self.krok
+            if k == 0:
+                dy = self.dyn_y - self.y
+                if abs(dy) < 50:
+                    self.krok = 2 # Už jsme tam
+                    return
+                # Y roste dolů na obrazovce = klesá ve světě
+                tar_h = 180.0 if dy < 0 else 0.0
+                h_err = normalize_heading(self.heading - tar_h)
+                if abs(h_err) > 5.0:
+                    if h_err > 0: self._cmd_otoc_vpravo(abs(h_err))
+                    else: self._cmd_otoc_vlevo(abs(h_err))
+                    self.krok = 1
+                else:
+                    self.krok = 1
+
+            elif k == 1:
+                if self.rbcx.hotovo:
+                    dy = self.dyn_y - self.y
+                    if abs(dy) > 50:
+                        self._cmd_jed(abs(dy))
+                    self.krok = 2
+
+            elif k == 2:
+                if self.rbcx.hotovo:
+                    self._zmen(PRESUN_X)
+
+        # ── DYNAMICKÝ PŘESUN Osa X ─────────────────────────────────
+        elif self.stav == PRESUN_X:
+            k = self.krok
+            if k == 0:
+                d_start = abs(self.dyn_start_x - self.x)
+                d_end = abs(self.dyn_end_x - self.x)
+                
+                if d_start < d_end:
+                    target_x = self.dyn_start_x
+                    self.nav.smer_doprava = True  # start_x < end_x
+                    self.nav.cil_x = self.dyn_end_x
+                else:
+                    target_x = self.dyn_end_x
+                    self.nav.smer_doprava = False
+                    self.nav.cil_x = self.dyn_start_x
+
+                dx = target_x - self.x
+                if abs(dx) < 50:
+                    self.krok = 2
+                    return
+                # X roste vpravo
+                tar_h = 90.0 if dx > 0 else -90.0
+                h_err = normalize_heading(self.heading - tar_h)
+                if abs(h_err) > 5.0:
+                    if h_err > 0: self._cmd_otoc_vpravo(abs(h_err))
+                    else: self._cmd_otoc_vlevo(abs(h_err))
+                    self.krok = 1
+                else:
+                    self.krok = 1
+
+            elif k == 1:
+                if self.rbcx.hotovo:
+                    target_x = self.dyn_start_x if self.nav.smer_doprava else self.dyn_end_x
+                    dx = target_x - self.x
+                    if abs(dx) > 50:
+                        self._cmd_jed(abs(dx))
+                    self.krok = 2
+
+            elif k == 2:
+                if self.rbcx.hotovo:
+                    tar_h = 90.0 if self.nav.smer_doprava else -90.0
+                    h_err = normalize_heading(self.heading - tar_h)
+                    if abs(h_err) > 5.0:
+                        if h_err > 0: self._cmd_otoc_vpravo(abs(h_err))
+                        else: self._cmd_otoc_vlevo(abs(h_err))
+                        self.krok = 3
+                    else:
+                        self.krok = 3
+                        
+            elif k == 3:
+                if self.rbcx.hotovo:
+                    self._cmd_jed(abs(self.nav.cil_x - self.x))
                     self._zmen(JEDU)
 
         # ── VRACÍM SE DOMŮ ─────────────────────────────────
@@ -974,20 +1111,26 @@ class Robot:
             # PRVNÍ START - Zcela od začátku
             self.cas_startu = time.time()
             self.nav.inicializuj()
+            self.dynamicky_rezim = False
             # Robot startuje v HOME (pravý dolní roh), míří NAHORU
             self.x = ARENA_SIZE_MM - SIRKA_ROBOTA_MM / 2   # 1350 mm
             self.y = SIRKA_ROBOTA_MM / 2                     # 150 mm
             self.heading = 0.0                                # míří nahoru (+Y)
             self.uz_vylozil = False
             self._log_msg("═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══")
+            self._cmd_jed(60)
+            self._zmen(NAJEZD)
         else:
             # DRUHÝ A DALŠÍ START - Pokračujeme z aktuální pozice
-            # Necháme běžet původní čas! Přeskočíme reset pozice.
-            self.nav.inicializuj()
-            self._log_msg("═══ DRUHÁ JÍZDA ZAHÁJENA ═══")
-
-        self._cmd_jed(60)
-        self._zmen(NAJEZD)
+            self.dynamicky_rezim = True
+            
+            cil = self.nav.vypocti_dalsi_cil(self.mapa)
+            if cil:
+                self.dyn_start_x, self.dyn_end_x, self.dyn_y, _ = cil
+                self._log_msg("═══ DRUHÁ JÍZDA (DYNAMICKÁ) ═══")
+                self._zmen(PRESUN_Y)
+            else:
+                self._log_msg("Mapa už přejetá! Dojezd pro 0 puku nedává smysl.")
 
 
 # =============================================================================
