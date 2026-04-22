@@ -862,27 +862,33 @@ class Robot:
             k = self.krok
             if k == 0:
                 dy = self.dyn_y - self.y
-                if abs(dy) < 50:
-                    self.krok = 2 # Už jsme tam
+                if abs(dy) < 30:
+                    self.krok = 3 # Už jsme tam
                     return
                 # Y roste dolů na obrazovce = klesá ve světě
                 tar_h = 180.0 if dy < 0 else 0.0
                 h_err = normalize_heading(self.heading - tar_h)
-                if abs(h_err) > 5.0:
-                    if h_err > 0: self._cmd_otoc_vpravo(abs(h_err))
-                    else: self._cmd_otoc_vlevo(abs(h_err))
-                    self.krok = 1
-                else:
-                    self.krok = 1
+                self._log_msg(f"Přesun Y: cíl={self.dyn_y:.0f}, aktuální={self.y:.0f}, heading_err={h_err:.1f}°")
+                if abs(h_err) > 3.0:
+                    if h_err > 0: self._cmd_otoc_vlevo(abs(h_err))
+                    else: self._cmd_otoc_vpravo(abs(h_err))
+                self.krok = 1
 
             elif k == 1:
+                # Čekáme na dotočení
                 if self.rbcx.hotovo:
-                    dy = self.dyn_y - self.y
-                    if abs(dy) > 50:
-                        self._cmd_jed(abs(dy))
+                    self._cmd_jed(60) 
                     self.krok = 2
 
             elif k == 2:
+                # Kontrola dosažení Y
+                dy = self.dyn_y - self.y
+                if abs(dy) <= 25: 
+                    self._cmd_stop()
+                    self._log_msg(f"Dosaženo Y={self.y:.0f}")
+                    self.krok = 3
+
+            elif k == 3:
                 if self.rbcx.hotovo:
                     self._zmen(PRESUN_X)
 
@@ -890,54 +896,61 @@ class Robot:
         elif self.stav == PRESUN_X:
             k = self.krok
             if k == 0:
+                # Určíme bližší kraj úseku
                 d_start = abs(self.dyn_start_x - self.x)
                 d_end = abs(self.dyn_end_x - self.x)
                 
                 if d_start < d_end:
                     target_x = self.dyn_start_x
-                    self.nav.smer_doprava = True  # start_x < end_x
+                    self.nav.smer_doprava = True  # Půjdeme pak doprava k end_x
                     self.nav.cil_x = self.dyn_end_x
                 else:
                     target_x = self.dyn_end_x
-                    self.nav.smer_doprava = False
+                    self.nav.smer_doprava = False # Půjdeme pak doleva k start_x
                     self.nav.cil_x = self.dyn_start_x
 
                 dx = target_x - self.x
-                if abs(dx) < 50:
-                    self.krok = 2
+                self._log_msg(f"Přesun X: cíl={target_x:.0f}, aktuální={self.x:.0f}, pak směr={'DOPRAVA' if self.nav.smer_doprava else 'DOLEVA'}")
+                
+                if abs(dx) < 30:
+                    self.krok = 3 # Už jsme tam
                     return
-                # X roste vpravo
+
                 tar_h = 90.0 if dx > 0 else -90.0
                 h_err = normalize_heading(self.heading - tar_h)
-                if abs(h_err) > 5.0:
-                    if h_err > 0: self._cmd_otoc_vpravo(abs(h_err))
-                    else: self._cmd_otoc_vlevo(abs(h_err))
-                    self.krok = 1
-                else:
-                    self.krok = 1
+                if abs(h_err) > 3.0:
+                    if h_err > 0: self._cmd_otoc_vlevo(abs(h_err))
+                    else: self._cmd_otoc_vpravo(abs(h_err))
+                self.krok = 1
 
             elif k == 1:
                 if self.rbcx.hotovo:
-                    target_x = self.dyn_start_x if self.nav.smer_doprava else self.dyn_end_x
-                    dx = target_x - self.x
-                    if abs(dx) > 50:
-                        self._cmd_jed(abs(dx))
+                    self._cmd_jed(60)
                     self.krok = 2
 
             elif k == 2:
+                # Kontrola dosažení X začátku úseku
+                t_x = self.dyn_start_x if self.nav.smer_doprava else self.dyn_end_x
+                dx = t_x - self.x
+                if abs(dx) <= 25:
+                    self._cmd_stop()
+                    self._log_msg(f"Dosaženo X={self.x:.0f}, startuji čištění k {self.nav.cil_x:.0f}")
+                    self.krok = 3
+
+            elif k == 3:
+                # Natočit se do směru lajny
                 if self.rbcx.hotovo:
                     tar_h = 90.0 if self.nav.smer_doprava else -90.0
                     h_err = normalize_heading(self.heading - tar_h)
-                    if abs(h_err) > 5.0:
-                        if h_err > 0: self._cmd_otoc_vpravo(abs(h_err))
-                        else: self._cmd_otoc_vlevo(abs(h_err))
-                        self.krok = 3
-                    else:
-                        self.krok = 3
+                    if abs(h_err) > 3.0:
+                        if h_err > 0: self._cmd_otoc_vlevo(abs(h_err))
+                        else: self._cmd_otoc_vpravo(abs(h_err))
+                    self.krok = 4
                         
-            elif k == 3:
+            elif k == 4:
                 if self.rbcx.hotovo:
-                    self._cmd_jed(abs(self.nav.cil_x - self.x))
+                    # Předáváme řízení standartnímu JEDU! (S rychlostí 60)
+                    self._cmd_jed(60)
                     self._zmen(JEDU)
 
         # ── VRACÍM SE DOMŮ ─────────────────────────────────
@@ -1126,8 +1139,9 @@ class Robot:
             
             cil = self.nav.vypocti_dalsi_cil(self.mapa)
             if cil:
-                self.dyn_start_x, self.dyn_end_x, self.dyn_y, _ = cil
-                self._log_msg("═══ DRUHÁ JÍZDA (DYNAMICKÁ) ═══")
+                self.dyn_start_x, self.dyn_end_x, self.dyn_y, l_idx = cil
+                self._log_msg(f"═══ DRUHÁ JÍZDA (DYNAMICKÁ) ═══")
+                self._log_msg(f"Další úkol: lajna {l_idx} (Y={self.dyn_y:.0f}), X={self.dyn_start_x:.0f} až {self.dyn_end_x:.0f}")
                 self._zmen(PRESUN_Y)
             else:
                 self._log_msg("Mapa už přejetá! Dojezd pro 0 puku nedává smysl.")
