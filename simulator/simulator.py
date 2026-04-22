@@ -288,6 +288,7 @@ class Robot:
         self.krok = 0
         self.cas_startu = None
         self.cas_zapas_s = 0.0
+        self.uz_vylozil = False
 
         self.rbcx = SimRbcx()
         self.nav = Navigace()
@@ -540,7 +541,8 @@ class Robot:
 
             if (zbyva < CAS_NOUZOVEHO_NAVRATU_S
                 and self.stav != NOUZOVY
-                and self.stav != VYKLADAM):
+                and self.stav != VYKLADAM
+                and not self.uz_vylozil):
                 self._log_msg("!!! ČAS KONČÍ → NOUZOVÝ NÁVRAT !!!")
                 self._cmd_stop()
                 self._zmen(NOUZOVY)
@@ -935,6 +937,7 @@ class Robot:
 
             elif k == 60:
                 self._log_msg("═══ PŘIPRAVENA NA DALŠÍ KOLO ═══")
+                self.uz_vylozil = True
                 self._zmen(CEKAM)
 
         # ── NOUZOVÝ NÁVRAT ─────────────────────────────────
@@ -966,18 +969,25 @@ class Robot:
     def start_zapasu(self):
         if self.stav != CEKAM:
             return
-        self.cas_startu = time.time()
-        self.nav.inicializuj()
-
-        # Robot startuje v HOME (pravý dolní roh), míří NAHORU
-        # heading = 0° = +Y (nahoru) v navigační konvenci
-        self.x = ARENA_SIZE_MM - SIRKA_ROBOTA_MM / 2   # 1350 mm
-        self.y = SIRKA_ROBOTA_MM / 2                     # 150 mm
-        self.heading = 0.0                                # míří nahoru (+Y)
+            
+        if self.cas_startu is None:
+            # PRVNÍ START - Zcela od začátku
+            self.cas_startu = time.time()
+            self.nav.inicializuj()
+            # Robot startuje v HOME (pravý dolní roh), míří NAHORU
+            self.x = ARENA_SIZE_MM - SIRKA_ROBOTA_MM / 2   # 1350 mm
+            self.y = SIRKA_ROBOTA_MM / 2                     # 150 mm
+            self.heading = 0.0                                # míří nahoru (+Y)
+            self.uz_vylozil = False
+            self._log_msg("═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══")
+        else:
+            # DRUHÝ A DALŠÍ START - Pokračujeme z aktuální pozice
+            # Necháme běžet původní čas! Přeskočíme reset pozice.
+            self.nav.inicializuj()
+            self._log_msg("═══ DRUHÁ JÍZDA ZAHÁJENA ═══")
 
         self._cmd_jed(60)
         self._zmen(NAJEZD)
-        self._log_msg("═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══")
 
 
 # =============================================================================
