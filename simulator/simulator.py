@@ -272,15 +272,12 @@ class Navigace:
         # Ne-wrapujeme! Volající musí zkontrolovat cislo_lajny >= pocet_lajn
 
     def vypocti_dalsi_cil(self, mapa, startovane_z_home=False):
-        """Prozkoumá mapu 10x10 a najde největší nevyčištěný úsek na standardních lajnách Y."""
+        """Prozkoumá celou mapu 10x10 a najde největší nevyčištěný úsek."""
         nej_delka = 0
         nej_usek = None
-        nej_lajna = -1
+        nej_y_row = -1
 
-        for i in range(self.pocet_lajn):
-            y_mm = self.lajna_y[i]
-            by = min(POCET_BUNEK_Y - 1, int(y_mm / BUNKA_MM))
-            
+        for by in range(POCET_BUNEK_Y):
             # Najdeme sekvence prázdných (nevybarvených) buněk (False)
             delka_sekvence = 0
             start_x_idx = -1
@@ -294,23 +291,29 @@ class Navigace:
                     if delka_sekvence > nej_delka:
                         nej_delka = delka_sekvence
                         nej_usek = (start_x_idx, x_idx - 1)
-                        nej_lajna = i
+                        nej_y_row = by
                     delka_sekvence = 0
             
-            # Dotazení sekvence na konci lajny (pravý okraj)
+            # Dotazení sekvence na konci řádku
             if delka_sekvence > nej_delka:
                 nej_delka = delka_sekvence
                 nej_usek = (start_x_idx, POCET_BUNEK_X - 1)
-                nej_lajna = i
+                nej_y_row = by
 
         if nej_usek is None or nej_delka == 0:
             return None # Vše pokryto
         
         sx, ex = nej_usek
+        # Středy buněk
         start_x_mm = sx * BUNKA_MM + BUNKA_MM / 2
         end_x_mm = ex * BUNKA_MM + BUNKA_MM / 2
+        target_y_mm = nej_y_row * BUNKA_MM + BUNKA_MM / 2
+
+        # CLAMPING k bezpečnostním okrajům zdí (200 mm)
+        start_x_mm = max(BEZPECNA_VZDALENOST_ZDI, min(start_x_mm, ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI))
+        end_x_mm = max(BEZPECNA_VZDALENOST_ZDI, min(end_x_mm, ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI))
         
-        return (start_x_mm, end_x_mm, self.lajna_y[nej_lajna], nej_lajna)
+        return (start_x_mm, end_x_mm, target_y_mm, nej_y_row)
 
 
 # =============================================================================
@@ -446,6 +449,9 @@ class Robot:
         return max(0, min(int(val / BUNKA_MM), POCET_BUNEK_Y - 1))
 
     def _oznac_pokryti(self):
+        if not self._jedu:
+            return # Vybarvujeme jen při jízdě vpřed
+
         r = SIRKA_ROBOTA_MM / 2.0
         step = BUNKA_MM / 2.0
         offs = [-r, -step, 0, step, r]
