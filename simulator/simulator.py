@@ -143,6 +143,7 @@ PRECHOD  = 'PRECHOD_LAJNY'
 VYHYBAM  = 'VYHYBAM_SE'
 DOMU     = 'VRACIM_DOMU'
 VYKLADAM = 'VYKLADAM'
+SROVNEJ  = 'SROVNEJ_SE'
 NOUZOVY  = 'NOUZOVY_NAVRAT'
 
 STAV_BARVA_MAP = {
@@ -153,6 +154,7 @@ STAV_BARVA_MAP = {
     VYHYBAM:  B.STAV['VYHYB'],
     DOMU:     B.STAV['DOMU'],
     VYKLADAM: B.STAV['VYKLAM'],
+    SROVNEJ:  (255, 160, 50),
     NOUZOVY:  B.STAV['NOUZOV'],
 }
 
@@ -869,11 +871,14 @@ class Robot:
                     self.krok = 60
 
             elif k == 60:
-                self._log_msg("═══ PŘIPRAVENA NA DALŠÍ KOLO ═══")
-                self.krok = 61
+                self._log_msg("Puky vyloženy! SROVNÁVÁM SE...")
+                self._zmen(SROVNEJ)
 
-            elif k == 61:
-                pass  # Čekáme
+        # ── SROVNÁNÍ PODLE STĚNY ───────────────────────────
+        elif self.stav == SROVNEJ:
+            self._log_msg("Srovnávám orientaci (LiDAR / 0.0°)...")
+            self.heading = 0.0
+            self._zmen(CEKAM)
 
 
 

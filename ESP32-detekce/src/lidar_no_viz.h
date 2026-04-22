@@ -30,8 +30,8 @@
 static float angleOffset = 7.0f;
 
 // --- Pozice "domů" (pravý dolní roh, 30 cm od krajů) ---
-#define HOME_X  (NV_ARENA_SIZE - 300.0f)
-#define HOME_Y  300.0f
+#define HOME_X  (NV_ARENA_SIZE - 500.0f)
+#define HOME_Y  500.0f
 
 // ---- Interní stav (vlastní namespace pomocí nv_ prefixu) ----
 static const int NV_PACKET_SIZE = 47;
