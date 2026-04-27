@@ -63,7 +63,8 @@ POCET_BUNEK_Y = 10
 BUNKA_MM = ARENA_SIZE_MM / 10.0
 
 # Soupeř
-VZDALENOST_SOUPERE_STOP = 500.0  # 50 cm — poloměr detekce soupeře
+VZDALENOST_SOUPERE_STOP  = 500.0  # 50 cm — poloměr ZASTAVENÍ (soupeř blokuje)
+VZDALENOST_SOUPERE_VOLNO = 650.0  # 65 cm — poloměr ROZJEZDU (+15 cm rezerva)
 UHEL_SOUPERE_VPRED = 45.0
 
 # Puky
@@ -417,6 +418,18 @@ class Robot:
         angle_sup = math.degrees(math.atan2(dx, dy))
         rel = normalize_heading(angle_sup - self.heading)
         return vzd < VZDALENOST_SOUPERE_STOP and abs(rel) < UHEL_SOUPERE_VPRED
+
+    def _sup_volno(self):
+        """Soupeř je bezpečně daleko (s rezervou +15 cm) — lze se rozjet."""
+        if not self.sup_on:
+            return True
+        dx = self.sup_x - self.x
+        dy = self.sup_y - self.y
+        vzd = math.sqrt(dx*dx + dy*dy)
+        angle_sup = math.degrees(math.atan2(dx, dy))
+        rel = normalize_heading(angle_sup - self.heading)
+        # "Volno" jen kdyz je dál než VOLNO dist, nebo mimo zorny uhel
+        return vzd >= VZDALENOST_SOUPERE_VOLNO or abs(rel) >= UHEL_SOUPERE_VPRED
 
     def _sup_vSmeru(self, target_heading, max_dist=VZDALENOST_SOUPERE_STOP, fov=UHEL_SOUPERE_VPRED):
         """Podívá se teoretickým senzorem (LiDARem) zadaným směrem, jestli tam není soupeř."""
@@ -817,7 +830,7 @@ class Robot:
 
                 if not ma_misto_dole:
                     # U spodní stěny — nemůžeme jít dolů, čekej na místě
-                    if not self._sup_v_ceste():
+                    if self._sup_volno():
                         # Soupeř se pohnul, můžeme pokračovat
                         self._nastav_cil()
                         self._cmd_jed(60)
@@ -862,7 +875,7 @@ class Robot:
                 if self._t_krok3 and cas_dolu_v > 1.5:
                     tar_h = 90.0 if self.nav.smer_doprava else -90.0
                     # max_dist 600 mm — ne celá aréna!
-                    if not self._sup_vSmeru(tar_h, max_dist=600.0, fov=45.0):
+                    if not self._sup_vSmeru(tar_h, max_dist=VZDALENOST_SOUPERE_VOLNO, fov=45.0):
                         self._cmd_stop()
                         self.krok = 3
                     elif cas_dolu_v > 6.0:  # pojistka
@@ -1059,7 +1072,7 @@ class Robot:
                     self.krok = 20
 
             elif k == 12:  # Čekáme na uvolnění cesty (soupeř blokuje)
-                if not self._sup_v_ceste():
+                if self._sup_volno():
                     self._log_msg("Cesta volná, pokračuji domů.")
                     self._cmd_jed(60)
                     self.krok = 11
@@ -1119,7 +1132,7 @@ class Robot:
                     self.krok = 50
 
             elif k == 45:
-                if not self._sup_v_ceste():
+                if self._sup_volno():
                     self._log_msg("Soupeř je pryč, pokračuji ve vykládání.")
                     self._cmd_jed(40)
                     self._t_krok3 = time.time()
