@@ -45,9 +45,14 @@ import sys
 # =============================================================================
 
 ARENA_SIZE_MM = 1500.0
-SIRKA_ROBOTA_MM = 300.0
-DELKA_ROBOTA_MM = 350.0
-BEZPECNA_VZDALENOST_ZDI = 200.0
+SIRKA_ROBOTA_MM = 300.0       # skutečné rozměry: 30 cm
+DELKA_ROBOTA_MM = 360.0       # skutečné rozměry: 36 cm
+LIDAR_OD_PREDKU_MM = 40.0     # z lidar_no_viz.h: NV_LIDAR_FROM_FRONT
+
+# Bezpečnostní okraje (souřadnice = STŘED robota, chceme 10 cm od okraje robota ke zdi)
+BEZPECNA_VZDALENOST_ZDI   = SIRKA_ROBOTA_MM / 2 + 100.0   # 150 + 100 = 250 mm  (X osa)
+BEZPECNA_VZDALENOST_ZDIE_Y = DELKA_ROBOTA_MM / 2 + 100.0  # 180 + 100 = 280 mm  (Y osa)
+
 HOME_X = ARENA_SIZE_MM - 250.0   # Střed domovské zóny: 1250 mm
 HOME_Y = 250.0                    # Střed domovské zóny: 250 mm
 
@@ -309,9 +314,10 @@ class Navigace:
         end_x_mm = ex * BUNKA_MM + BUNKA_MM / 2
         target_y_mm = nej_y_row * BUNKA_MM + BUNKA_MM / 2
 
-        # CLAMPING k bezpečnostním okrajům zdí (200 mm)
+        # CLAMPING — robot nesmí jet blíž ke zdi než polovina délky + 100 mm
         start_x_mm = max(BEZPECNA_VZDALENOST_ZDI, min(start_x_mm, ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI))
-        end_x_mm = max(BEZPECNA_VZDALENOST_ZDI, min(end_x_mm, ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI))
+        end_x_mm   = max(BEZPECNA_VZDALENOST_ZDI, min(end_x_mm,   ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI))
+        target_y_mm = max(BEZPECNA_VZDALENOST_ZDIE_Y, min(target_y_mm, ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDIE_Y))
         
         return (start_x_mm, end_x_mm, target_y_mm, nej_y_row)
 
@@ -1270,7 +1276,7 @@ class Renderer:
         """
         rx, ry = self.mm2px(rob.x, rob.y)
         w = int(SIRKA_ROBOTA_MM * MERITKO)
-        h = int(DELKA_ROBOTA_MM * 0.5 * MERITKO)
+        h = int(DELKA_ROBOTA_MM * MERITKO)  # plná délka robota (ne * 0.5)
 
         surf = pygame.Surface((w, h), pygame.SRCALPHA)
         barva = STAV_BARVA_MAP.get(rob.stav, B.ROBOT_BODY)
