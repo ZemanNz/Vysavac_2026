@@ -912,7 +912,6 @@ class Robot:
                 if abs(dy) < 30:
                     self.krok = 3 # Už jsme tam
                     return
-                # Y roste dolů na obrazovce = klesá ve světě
                 tar_h = 180.0 if dy < 0 else 0.0
                 h_err = normalize_heading(self.heading - tar_h)
                 self._log_msg(f"Přesun Y: cíl={self.dyn_y:.0f}, aktuální={self.y:.0f}, heading_err={h_err:.1f}°")
@@ -922,18 +921,29 @@ class Robot:
                 self.krok = 1
 
             elif k == 1:
-                # Čekáme na dotočení
                 if self.rbcx.hotovo:
-                    self._cmd_jed(60) 
+                    self._cmd_jed(60)   # sbíráme puky po cestě
                     self.krok = 2
 
             elif k == 2:
+                # Hlídáme soupeře stejně jako JEDU
+                if self._sup_v_ceste():
+                    self._cmd_stop()
+                    self._log_msg("Soupeř v cestě (PRESUN_Y)! Čekám...")
+                    self.krok = 20
+                    return
                 # Kontrola dosažení Y
                 dy = self.dyn_y - self.y
-                if abs(dy) <= 25: 
+                if abs(dy) <= 25:
                     self._cmd_stop()
                     self._log_msg(f"Dosaženo Y={self.y:.0f}")
                     self.krok = 3
+
+            elif k == 20:  # Čekání na uvolnění (PRESUN_Y)
+                if self._sup_volno():
+                    self._log_msg("Cesta Y volná, pokračuji.")
+                    self._cmd_jed(60)
+                    self.krok = 2
 
             elif k == 3:
                 if self.rbcx.hotovo:
@@ -943,24 +953,23 @@ class Robot:
         elif self.stav == PRESUN_X:
             k = self.krok
             if k == 0:
-                # Určíme bližší kraj úseku
                 d_start = abs(self.dyn_start_x - self.x)
                 d_end = abs(self.dyn_end_x - self.x)
                 
                 if d_start < d_end:
                     target_x = self.dyn_start_x
-                    self.nav.smer_doprava = True  # Půjdeme pak doprava k end_x
+                    self.nav.smer_doprava = True
                     self.nav.cil_x = self.dyn_end_x
                 else:
                     target_x = self.dyn_end_x
-                    self.nav.smer_doprava = False # Půjdeme pak doleva k start_x
+                    self.nav.smer_doprava = False
                     self.nav.cil_x = self.dyn_start_x
 
                 dx = target_x - self.x
                 self._log_msg(f"Přesun X: cíl={target_x:.0f}, aktuální={self.x:.0f}, pak směr={'DOPRAVA' if self.nav.smer_doprava else 'DOLEVA'}")
                 
                 if abs(dx) < 30:
-                    self.krok = 3 # Už jsme tam
+                    self.krok = 3
                     return
 
                 tar_h = 90.0 if dx > 0 else -90.0
@@ -972,10 +981,16 @@ class Robot:
 
             elif k == 1:
                 if self.rbcx.hotovo:
-                    self._cmd_jed(60)
+                    self._cmd_jed(60)   # sbíráme puky po cestě
                     self.krok = 2
 
             elif k == 2:
+                # Hlídáme soupeře stejně jako JEDU
+                if self._sup_v_ceste():
+                    self._cmd_stop()
+                    self._log_msg("Soupeř v cestě (PRESUN_X)! Čekám...")
+                    self.krok = 21
+                    return
                 # Kontrola dosažení X začátku úseku
                 t_x = self.dyn_start_x if self.nav.smer_doprava else self.dyn_end_x
                 dx = t_x - self.x
@@ -983,6 +998,12 @@ class Robot:
                     self._cmd_stop()
                     self._log_msg(f"Dosaženo X={self.x:.0f}, startuji čištění k {self.nav.cil_x:.0f}")
                     self.krok = 3
+
+            elif k == 21:  # Čekání na uvolnění (PRESUN_X)
+                if self._sup_volno():
+                    self._log_msg("Cesta X volná, pokračuji.")
+                    self._cmd_jed(60)
+                    self.krok = 2
 
             elif k == 3:
                 # Natočit se do směru lajny
