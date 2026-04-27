@@ -812,6 +812,19 @@ class Robot:
         elif self.stav == VYHYBAM:
             k = self.krok
             if k == 0:
+                # Zkontroluj, zda je místo pod námi (Y > bezpečná zóna + 1 lajna)
+                ma_misto_dole = (self.y > BEZPECNA_VZDALENOST_ZDIE_Y + SIRKA_ROBOTA_MM)
+
+                if not ma_misto_dole:
+                    # U spodní stěny — nemůžeme jít dolů, čekej na místě
+                    if not self._sup_v_ceste():
+                        # Soupeř se pohnul, můžeme pokračovat
+                        self._nastav_cil()
+                        self._cmd_jed(60)
+                        self._zmen(self._stav_po_vyhybani)
+                    # jinak stát a čekat (loop se zavolá znovu)
+                    return
+
                 # Chceme zajet do další lajny - je to volné?
                 if self._sup_vSmeru(180.0, max_dist=500.0, fov=45.0):
                     self._log_msg("Lidar vidí soupeře pod námi! Vracím se starou lajnou.")
@@ -1013,7 +1026,7 @@ class Robot:
                         self._cmd_stop()
                         self.krok = 0  # znovu zamiř
 
-        # ── VYKLÁDÁM PUKY ──────────────────────────────────
+        # ── VYKLÁDÁM PUKY ────────────────────────────────────────
         elif self.stav == VYKLADAM:
             k = self.krok
 
@@ -1064,6 +1077,13 @@ class Robot:
                     self.krok = 30
 
             elif k == 30:
+                # Kontrola: jsme opravdu v HOME zóně (před otevřením zásobníků)?
+                v_home_x = self.x >= ARENA_SIZE_MM - HOME_ZONA_MM
+                v_home_y = self.y <= HOME_ZONA_MM
+                if not (v_home_x and v_home_y):
+                    self._log_msg(f"Nejsem v HOME! (x={self.x:.0f}, y={self.y:.0f}) → jdu domů")
+                    self._zmen(DOMU)
+                    return
                 self._log_msg("Otevírám zásobníky...")
                 self._cmd_vyloz()
                 self.krok = 31
