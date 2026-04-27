@@ -44,7 +44,7 @@ import sys
 #  KONSTANTY (odpovídají mozek.h a lidar_no_viz.h)
 # =============================================================================
 
-ARENA_SIZE_MM = 1500.0
+ARENA_SIZE_MM = 2500.0
 SIRKA_ROBOTA_MM = 300.0       # skutečné rozměry: 30 cm
 DELKA_ROBOTA_MM = 360.0       # skutečné rozměry: 36 cm
 LIDAR_OD_PREDKU_MM = 40.0     # z lidar_no_viz.h: NV_LIDAR_FROM_FRONT
@@ -53,8 +53,9 @@ LIDAR_OD_PREDKU_MM = 40.0     # z lidar_no_viz.h: NV_LIDAR_FROM_FRONT
 BEZPECNA_VZDALENOST_ZDI   = SIRKA_ROBOTA_MM / 2 + 100.0   # 150 + 100 = 250 mm  (X osa)
 BEZPECNA_VZDALENOST_ZDIE_Y = DELKA_ROBOTA_MM / 2 + 100.0  # 180 + 100 = 280 mm  (Y osa)
 
-HOME_X = ARENA_SIZE_MM - 250.0   # Střed domovské zóny: 1250 mm
-HOME_Y = 250.0                    # Střed domovské zóny: 250 mm
+HOME_ZONA_MM  = 700.0                    # velikost domácí zóny: 70 cm x 70 cm
+HOME_X = ARENA_SIZE_MM - HOME_ZONA_MM / 2  # střed: 2500 - 350 = 2150 mm
+HOME_Y = HOME_ZONA_MM / 2                   # střed: 350 mm
 
 # Mřížka pokrytí
 POCET_BUNEK_X = 10
@@ -62,11 +63,11 @@ POCET_BUNEK_Y = 10
 BUNKA_MM = ARENA_SIZE_MM / 10.0
 
 # Soupeř
-VZDALENOST_SOUPERE_STOP = 400.0
+VZDALENOST_SOUPERE_STOP = 500.0  # 50 cm — poloměr detekce soupeře
 UHEL_SOUPERE_VPRED = 45.0
 
 # Puky
-PUKY_PLNY_ZASOBNIK = 5
+PUKY_PLNY_ZASOBNIK = 10
 
 # Čas
 DELKA_ZAPASU_S = 180.0
@@ -760,7 +761,7 @@ class Robot:
                     self._t_krok3 = time.time()
                     self.krok = 3
 
-            elif k == 3:  # Popojíždíme o šířku robota (~2s)
+            elif k == 3:  # Popojíždíme o šířku robota
                 if self._sup_v_ceste():
                     self._cmd_stop()
                     self._log_msg("Soupeř na přechodu! Vracím se starou lajnou zpět.")
@@ -769,12 +770,17 @@ class Robot:
                     self.krok = 10
                     return
 
-                # Uplynul čas základního přejezdu lajny?
-                if self._t_krok3 and time.time() - self._t_krok3 > 2.0:
+                cas_dolu = time.time() - self._t_krok3
+
+                # "Jsem dole" = Y je blíké spodku arény (v rámci 1 lajny od bezpečnostní zóny)
+                jsem_dole = (self.y <= BEZPECNA_VZDALENOST_ZDIE_Y + SIRKA_ROBOTA_MM)
+
+                if self._t_krok3 and cas_dolu > 2.0:
                     tar_h = -90.0 if self.nav.smer_doprava else 90.0
-                    # Pokud v nové lajně není soupeř, můžeme zatočit.
-                    # Pokud tam je, podmínka neprojde a robot POKRAČUJE dál v jízdě dolů!
-                    if not self._sup_vSmeru(tar_h, max_dist=1500.0, fov=45.0):
+                    volno = not self._sup_vSmeru(tar_h, max_dist=600.0, fov=45.0)
+                    if volno or jsem_dole or cas_dolu > 8.0:
+                        if jsem_dole and not volno:
+                            self._log_msg("Jsem u spodní zědi → natočuju se bez ohledu na soupeře.")
                         self._cmd_stop()
                         self._t_krok3 = None
                         self.krok = 4
@@ -839,11 +845,14 @@ class Robot:
                     return
 
                 # Uplynul čas minimálního vyhýbacího manévru (1.5s)?
-                if self._t_krok3 and time.time() - self._t_krok3 > 1.5:
+                cas_dolu_v = time.time() - self._t_krok3
+                if self._t_krok3 and cas_dolu_v > 1.5:
                     tar_h = 90.0 if self.nav.smer_doprava else -90.0
-                    # Pokud se už můžeme vrátit k původnímu směru, otočíme se.
-                    # Jinak pokračujeme v únikovém kurzu dolů.
-                    if not self._sup_vSmeru(tar_h, max_dist=1500.0, fov=45.0):
+                    # max_dist 600 mm — ne celá aréna!
+                    if not self._sup_vSmeru(tar_h, max_dist=600.0, fov=45.0):
+                        self._cmd_stop()
+                        self.krok = 3
+                    elif cas_dolu_v > 6.0:  # pojistka
                         self._cmd_stop()
                         self.krok = 3
 
@@ -1026,10 +1035,10 @@ class Robot:
                     self._cmd_jed(60)
                     self.krok = 11
 
-            elif k == 11:  # Jedeme do HOME zóny
-                if self.x >= ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI:  # k bezpečné vzdálenosti jako při jízdě lajny
+            elif k == 11:  # Jedeme doprava ke zdi, sbíráme puky po cestě
+                if self.x >= ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI:  # stejně jako konec normální lajny
                     self._cmd_stop()
-                    self.krok = 20  # Společně se správně natoč
+                    self.krok = 20
 
             # === Společná fáze: Natočení nahoru a dump manévr ===
             elif k == 20:
@@ -1137,9 +1146,9 @@ class Robot:
             self.cas_startu = time.time()
             self.nav.inicializuj()
             self.dynamicky_rezim = False
-            # Robot startuje v HOME (pravý dolní roh), míří NAHORU
-            self.x = ARENA_SIZE_MM - SIRKA_ROBOTA_MM / 2   # 1350 mm
-            self.y = SIRKA_ROBOTA_MM / 2                     # 150 mm
+            # Robot startuje v HOME: 10 cm od pravé zdi, střed HOME zóny Y
+            self.x = ARENA_SIZE_MM - SIRKA_ROBOTA_MM / 2 - 100.0  # = 2250 mm
+            self.y = HOME_Y                                          # = 350 mm (střed HOME)
             self.heading = 0.0                                # míří nahoru (+Y)
             self.uz_vylozil = False
             self._log_msg("═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══")
@@ -1206,9 +1215,9 @@ class Renderer:
             y = ARENA_Y0 + int(i * BUNKA_MM * MERITKO)
             pygame.draw.line(self.scr, B.GRID_LINE, (ARENA_X0, y), (ARENA_X0+ARENA_PX, y))
 
-        # HOME zóna (pravý dolní roh)
-        hx1, hy1 = self.mm2px(ARENA_SIZE_MM - 500, 0)
-        hx2, hy2 = self.mm2px(ARENA_SIZE_MM, 500)
+        # HOME zóna (pravý dolní roh, 700x700 mm)
+        hx1, hy1 = self.mm2px(ARENA_SIZE_MM - HOME_ZONA_MM, 0)
+        hx2, hy2 = self.mm2px(ARENA_SIZE_MM, HOME_ZONA_MM)
         hr = pygame.Rect(min(hx1,hx2), min(hy1,hy2),
                          abs(hx2-hx1), abs(hy2-hy1))
         hs = pygame.Surface((hr.w, hr.h), pygame.SRCALPHA)
@@ -1247,7 +1256,7 @@ class Renderer:
         # Soupeř
         if rob.sup_on:
             sx, sy = self.mm2px(rob.sup_x, rob.sup_y)
-            r = int(SIRKA_ROBOTA_MM / 2 * MERITKO)
+            r = int(250 * MERITKO)  # průmer 50 cm = poloměr 250 mm
             pygame.draw.circle(self.scr, B.SOUPER, (sx, sy), r)
             pygame.draw.circle(self.scr, (255,100,100), (sx, sy), r, 2)
             t = self.fs.render("SOUPEŘ", True, B.SOUPER)
@@ -1257,7 +1266,7 @@ class Renderer:
         self._robot(rob)
 
         # Nadpis
-        t = self.ft.render("ARÉNA (1500×1500 mm)", True, B.TXT)
+        t = self.ft.render(f"ARÉNA ({int(ARENA_SIZE_MM)}×{int(ARENA_SIZE_MM)} mm)", True, B.TXT)
         self.scr.blit(t, (ARENA_X0 + ARENA_PX//2 - t.get_width()//2, ARENA_Y0 - 28))
 
         # Osy
