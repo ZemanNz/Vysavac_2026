@@ -1048,10 +1048,22 @@ class Robot:
                     self._cmd_jed(60)
                     self.krok = 11
 
-            elif k == 11:  # Jedeme doprava ke zdi, sbíráme puky po cestě
-                if self.x >= ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI:  # stejně jako konec normální lajny
+            elif k == 11:  # Jedeme doprava ke zdi, sbíráme puky po cestě (= stejná logika jako JEDU)
+                if self._sup_v_ceste():
+                    # Soupeř v cestě → zastavit a čekat (krok 12)
+                    self._cmd_stop()
+                    self._log_msg("Soupeř blokuje cestu domů! Čekám...")
+                    self.krok = 12
+                elif self.x >= ARENA_SIZE_MM - BEZPECNA_VZDALENOST_ZDI:
                     self._cmd_stop()
                     self.krok = 20
+
+            elif k == 12:  # Čekáme na uvolnění cesty (soupeř blokuje)
+                if not self._sup_v_ceste():
+                    self._log_msg("Cesta volná, pokračuji domů.")
+                    self._cmd_jed(60)
+                    self.krok = 11
+
 
             # === Společná fáze: Natočení nahoru a dump manévr ===
             elif k == 20:
