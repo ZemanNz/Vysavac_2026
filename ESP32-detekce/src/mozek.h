@@ -22,21 +22,25 @@
 #define UART_RBCX_BAUD  115200
 
 // Časování
-#define DELKA_ZAPASU_MS       90000    // 90 sekund
+#define DELKA_ZAPASU_MS       180000   // 180 sekund (3 minuty)
 #define CAS_NOUZOVEHO_NAVRATU 10000    // posledních 10s → nouzový návrat
 
 // Rozměry robota (pro lajnovou navigaci)
 #define SIRKA_ROBOTA_MM       300.0f   // šířka robota = šířka jedné lajny
-#define BEZPECNA_VZDALENOST_ZDI  200.0f
-#define HOME_X 1250.0f
-#define HOME_Y 250.0f
+#define DELKA_ROBOTA_MM       360.0f   // délka robota
+#define BEZPECNA_VZDALENOST_ZDI    (SIRKA_ROBOTA_MM / 2.0f + 100.0f)  // 250 mm (X osa)
+#define BEZPECNA_VZDALENOST_ZDIE_Y (DELKA_ROBOTA_MM / 2.0f + 100.0f)  // 280 mm (Y osa)
+#define HOME_ZONA_MM          700.0f
+#define MOZEK_HOME_X  (NV_ARENA_SIZE - HOME_ZONA_MM / 2.0f)
+#define MOZEK_HOME_Y  (HOME_ZONA_MM / 2.0f)
 
-// Vzdálenost soupeře pro vyhýbání
-#define VZDALENOST_SOUPERE_STOP  400.0f  // mm — soupeř přímo v cestě → stop
+// Vzdálenost soupeře pro vyhýbání (s hysterezí)
+#define VZDALENOST_SOUPERE_STOP  500.0f  // mm — soupeř přímo v cestě → stop
+#define VZDALENOST_SOUPERE_VOLNO 650.0f  // mm — soupeř pryč → rozjezd (+15 cm rezerva)
 #define UHEL_SOUPERE_VPRED        45.0f  // ° — soupeř v tomto kuželu = "v cestě"
 
 // Limity puků
-#define PUKY_PLNY_ZASOBNIK  5    // kolik puků → jedem domů
+#define PUKY_PLNY_ZASOBNIK  10   // kolik puků → jedem domů
 
 // =============================================================================
 //  KOMUNIKAČNÍ PROTOKOL (musí odpovídat RBCX main_final.cpp!)
@@ -88,6 +92,7 @@ struct SenzoroveData {
     // Navigace domů
     float domov_vzdalenost;   // mm
     float domov_uhel;         // stupně (absolutní hodnota)
+    float domov_uhel_rel;     // stupně (se znaménkem, + = vpravo)
     char  domov_smer;         // 'L' nebo 'R'
 
     // Soupeř
@@ -168,6 +173,8 @@ enum StavRobota : uint8_t {
     STAV_VRACIM_SE_DOMU,            // Navigace k domácí zóně
     STAV_VYKLADAM_PUKY,             // Vyložení puků doma
     STAV_NOUZOVY_NAVRAT,            // Čas končí — řítíme se domů
+    STAV_PRESUN_Y,                  // Dynamický přesun na ose Y
+    STAV_PRESUN_X,                  // Dynamický přesun na ose X
 };
 
 const char* jmeno_stavu(StavRobota s) {
@@ -180,6 +187,8 @@ const char* jmeno_stavu(StavRobota s) {
         case STAV_VRACIM_SE_DOMU:         return "VRACIM_DOMU";
         case STAV_VYKLADAM_PUKY:          return "VYKLADAM";
         case STAV_NOUZOVY_NAVRAT:         return "NOUZOVY_NAVRAT";
+        case STAV_PRESUN_Y:               return "PRESUN_Y";
+        case STAV_PRESUN_X:               return "PRESUN_X";
         default:                          return "???";
     }
 }
@@ -200,9 +209,17 @@ static bool mapa_pokryti[POCET_BUNEK_X][POCET_BUNEK_Y];
 // Lajnová navigace
 static LajnovaNavigace navigace;
 
-// Sub-krok pro vícekrokové manévry (otáčení, vyhýbání, vykládání...)
-// Každý stav co potřebuje víc kroků si ho používá interně.
+// Sub-krok pro vícekrokové manévry
 static int krok = 0;
+
+// Dynamický režim (2. jízda po vyložení)
+static bool dynamicky_rezim = false;
+static bool uz_vylozil = false;
+static float dyn_start_x = 0, dyn_end_x = 0, dyn_y = 0;
+
+// Časovače pro kroky (odpovídají _t_krok3 a _c_zbytek v simulátoru)
+static unsigned long cas_krok_ms = 0;
+static unsigned long vyklad_zbyva_ms = 1500;
 
 // =============================================================================
 //  UART FUNKCE
@@ -277,6 +294,27 @@ bool souper_v_ceste() {
         && senzory.souper_uhel < UHEL_SOUPERE_VPRED;
 }
 
+// Soupeř je bezpečně daleko (hystereze +15 cm) — lze se rozjet
+bool souper_volno() {
+    if (!senzory.souper_viden) return true;
+    return senzory.souper_vzdalenost >= VZDALENOST_SOUPERE_VOLNO
+        || senzory.souper_uhel >= UHEL_SOUPERE_VPRED;
+}
+
+// Podívá se "LiDARem" zadaným absolutním směrem, jestli tam není soupeř
+bool souper_v_smeru(float target_heading_deg, float max_dist = VZDALENOST_SOUPERE_STOP, float fov = UHEL_SOUPERE_VPRED) {
+    if (!senzory.souper_viden) return false;
+    float dx = senzory.souper_x - senzory.pozice_x;
+    float dy = senzory.souper_y - senzory.pozice_y;
+    float vzd = sqrtf(dx*dx + dy*dy);
+    if (vzd > max_dist) return false;
+    float angle_sup = atan2f(dx, dy) * 180.0f / M_PI;
+    float rel = angle_sup - target_heading_deg;
+    while (rel > 180.0f) rel -= 360.0f;
+    while (rel <= -180.0f) rel += 360.0f;
+    return fabsf(rel) < fov;
+}
+
 bool naraz_vpredu() {
     return rbcx.tlacitko_vpredu_up || rbcx.tlacitko_vpredu_down;
 }
@@ -291,13 +329,14 @@ void mozek_aktualizuj_senzory() {
     senzory.heading   = nv_g_h * 180.0f / PI;
 
     // Domov
-    float dx = HOME_X - senzory.pozice_x;
-    float dy = HOME_Y - senzory.pozice_y;
+    float dx = MOZEK_HOME_X - senzory.pozice_x;
+    float dy = MOZEK_HOME_Y - senzory.pozice_y;
     senzory.domov_vzdalenost = sqrtf(dx*dx + dy*dy);
     float angle_home = atan2f(dx, dy);
     float rel = (angle_home - nv_g_h) * 180.0f / PI;
     while (rel >  180.0f) rel -= 360.0f;
     while (rel < -180.0f) rel += 360.0f;
+    senzory.domov_uhel_rel = rel;
     senzory.domov_uhel = fabsf(rel);
     senzory.domov_smer = (rel >= 0) ? 'R' : 'L';
 
@@ -368,6 +407,55 @@ bool najdi_nepokryte(float &cil_x, float &cil_y) {
         }
     }
     return nasel;
+}
+
+// Najdi největší nevyčištěný úsek (odpovídá simulator.py: vypocti_dalsi_cil)
+// Vrací true pokud něco našel, výsledek v out parametrech
+bool vypocti_dalsi_cil(float &out_start_x, float &out_end_x, float &out_y, int &out_row) {
+    int nej_delka = 0;
+    int nej_sx = -1, nej_ex = -1, nej_y_row = -1;
+
+    for (int by = 0; by < POCET_BUNEK_Y; by++) {
+        int delka_sekvence = 0;
+        int start_x_idx = -1;
+        
+        for (int x_idx = 0; x_idx < POCET_BUNEK_X; x_idx++) {
+            if (!mapa_pokryti[x_idx][by]) {
+                if (delka_sekvence == 0) start_x_idx = x_idx;
+                delka_sekvence++;
+            } else {
+                if (delka_sekvence > nej_delka) {
+                    nej_delka = delka_sekvence;
+                    nej_sx = start_x_idx;
+                    nej_ex = x_idx - 1;
+                    nej_y_row = by;
+                }
+                delka_sekvence = 0;
+            }
+        }
+        // Dotažení sekvence na konci řádku
+        if (delka_sekvence > nej_delka) {
+            nej_delka = delka_sekvence;
+            nej_sx = start_x_idx;
+            nej_ex = POCET_BUNEK_X - 1;
+            nej_y_row = by;
+        }
+    }
+
+    if (nej_delka == 0) return false;
+
+    // Středy buněk → mm
+    out_start_x = nej_sx * BUNKA_MM + BUNKA_MM / 2.0f;
+    out_end_x   = nej_ex * BUNKA_MM + BUNKA_MM / 2.0f;
+    out_y       = nej_y_row * BUNKA_MM + BUNKA_MM / 2.0f;
+    out_row     = nej_y_row;
+
+    // CLAMPING — robot nesmí jet blíž ke zdi
+    out_start_x = constrain(out_start_x, BEZPECNA_VZDALENOST_ZDI, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI);
+    out_end_x   = constrain(out_end_x,   BEZPECNA_VZDALENOST_ZDI, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI);
+    out_y       = constrain(out_y,        BEZPECNA_VZDALENOST_ZDIE_Y, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDIE_Y);
+
+    return true;
 }
 
 // Debug: vypiš mapu pokrytí do Serial (volat občas)
@@ -475,6 +563,7 @@ void zmen_stav(StavRobota novy) {
     }
     stav = novy;
     krok = 0;
+    cas_krok_ms = 0;
 }
 
 void mozek_rozhoduj() {
@@ -492,7 +581,8 @@ void mozek_rozhoduj() {
     // ║  NOUZOVÝ NÁVRAT — má nejvyšší prioritu, přeruší cokoliv ║
     // ╚══════════════════════════════════════════════════════════╝
     if (cas_startu > 0 && zbyva_ms < CAS_NOUZOVEHO_NAVRATU
-        && stav != STAV_NOUZOVY_NAVRAT && stav != STAV_VYKLADAM_PUKY) {
+        && stav != STAV_NOUZOVY_NAVRAT && stav != STAV_VYKLADAM_PUKY
+        && !uz_vylozil) {
         Serial.println("[MOZEK] !!! ČAS KONČÍ — NOUZOVÝ NÁVRAT !!!");
         posli_prikaz(CMD_STOP);
         zmen_stav(STAV_NOUZOVY_NAVRAT);
@@ -505,61 +595,44 @@ void mozek_rozhoduj() {
 
     // ──────────────────────────────────────────────────────
     //  ČEKÁM NA START
-    //  Robot stojí, čeká na signál. Nic nedělá.
     // ──────────────────────────────────────────────────────
     case STAV_CEKAM_NA_START:
-        // TODO: Startovní mechanismus
-        // Varianty:
-        //   - Tlačítko LEFT na RBCX (rbcx.tlacitko_vlevo)
-        //   - Příkaz přes UART
-        //   - Automaticky po N sekundách
-        //
-        // Až přijde signál:
-        //   cas_startu = millis();
-        //   inicializuj_lajny();
-        //   posli_prikaz(CMD_JED_SBIREJ, 60);  // jeď nahoru
-        //   zmen_stav(STAV_NAJEZD_NAHORU);
+        // Start se spouští voláním mozek_start_zapasu() zvenku
         break;
 
     // ──────────────────────────────────────────────────────
     //  NÁJEZD NAHORU
-    //  Robot startuje v HOME (pravý dolní roh) a jede vertikálně
-    //  nahoru po pravé straně arény (heading=0° = +Y).
-    //  Když Y dosáhne horní lajny → otoč doleva → JEDU_LAJNU
     // ──────────────────────────────────────────────────────
     case STAV_NAJEZD_NAHORU:
         switch (krok) {
             case 0:
-                // [A] Plný zásobník → jedeme domů vysypat
+                // [A] Plný zásobník
                 if (rbcx.pocet_puku >= PUKY_PLNY_ZASOBNIK) {
                     Serial.printf("[MOZEK] Plný zásobník (%d puků) → DOMŮ\n", rbcx.pocet_puku);
                     posli_prikaz(CMD_STOP);
                     zmen_stav(STAV_VRACIM_SE_DOMU);
                     break;
                 }
-
-                // [B] Soupeř v cestě → začínám lajny brzy
+                // [B] Soupeř v cestě
                 if (souper_v_ceste()) {
-                    Serial.printf("[MOZEK] Soupeř v cestě při nájezdu! dist=%.0f → začínám lajny brzy\n", senzory.souper_vzdalenost);
+                    Serial.printf("[MOZEK] Soupeř v cestě při nájezdu! → začínám lajny brzy\n");
                     posli_prikaz(CMD_STOP);
                     posli_prikaz(CMD_OTOC_VLEVO, 90);
                     krok = 1;
                     break;
                 }
-
                 // [C] Náraz vpředu
                 if (naraz_vpredu()) {
                     posli_prikaz(CMD_STOP);
-                    Serial.println("[MOZEK] Náraz vpředu u nájezdu nahoru → jdu rovnou doleva");
+                    Serial.println("[MOZEK] Náraz vpředu u nájezdu → jdu rovnou doleva");
                     posli_prikaz(CMD_OTOC_VLEVO, 90);
                     krok = 1;
                     break;
                 }
-
-                // Jedeme nahoru — čekáme než Y dosáhne lajny 0 (nahoře)
+                // Jedeme nahoru — čekáme než Y dosáhne lajny 0
                 if (senzory.pozice_y >= navigace.lajna_y[0] - SIRKA_ROBOTA_MM / 2.0f) {
                     posli_prikaz(CMD_STOP);
-                    posli_prikaz(CMD_OTOC_VLEVO, 90);  // 0° → -90° (doleva)
+                    posli_prikaz(CMD_OTOC_VLEVO, 90);
                     krok = 1;
                 }
                 break;
@@ -567,6 +640,7 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
                     posli_prikaz(CMD_JED_SBIREJ, 60);
+                    Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
@@ -575,27 +649,18 @@ void mozek_rozhoduj() {
 
     // ──────────────────────────────────────────────────────
     //  JEDU LAJNU
-    //  Hlavní stav — robot jede dopředu, sbírá puky.
-    //  Průběžně kontroluje:
-    //    - Dosáhl konce lajny? → přechod
-    //    - Soupeř v cestě? → vyhýbání
-    //    - Náraz (tlačítka)? → couvni + přechod
-    //    - Plný zásobník? → domů
     // ──────────────────────────────────────────────────────
     case STAV_JEDU_LAJNU:
-
-        // [A] Plný zásobník → jedeme domů vysypat
+        // [A] Plný zásobník
         if (rbcx.pocet_puku >= PUKY_PLNY_ZASOBNIK) {
             Serial.printf("[MOZEK] Plný zásobník (%d puků) → DOMŮ\n", rbcx.pocet_puku);
             posli_prikaz(CMD_STOP);
             zmen_stav(STAV_VRACIM_SE_DOMU);
             break;
         }
-
-        // [B] Soupeř v cestě → vyhýbání
+        // [B] Soupeř v cestě
         if (souper_v_ceste()) {
-            Serial.printf("[MOZEK] Soupeř v cestě! dist=%.0f uhel=%.0f → VYHÝBÁM SE\n",
-                senzory.souper_vzdalenost, senzory.souper_uhel);
+            Serial.printf("[MOZEK] Soupeř v cestě! dist=%.0f → VYHÝBÁM SE\n", senzory.souper_vzdalenost);
             posli_prikaz(CMD_STOP);
             zmen_stav(STAV_VYHYBAM_SE_SOUPERI);
             break;
@@ -632,25 +697,24 @@ void mozek_rozhoduj() {
         break;
 
     // ──────────────────────────────────────────────────────
-    //  PŘECHOD NA DALŠÍ LAJNU
-    //  Vícekrokový manévr:
-    //    krok 0: Couvni 100mm (odjet od zdi)
-    //    krok 1: Otoč se doleva 90°
-    //    krok 2: Popojeď o šířku robota (300mm)
-    //    krok 3: Otoč se doleva 90°
-    //    krok 4: Nastav novou lajnu → JEDU_LAJNU
+    //  PŘECHOD NA DALŠÍ LAJNU (1:1 se simulátorem)
     // ──────────────────────────────────────────────────────
     case STAV_PRECHOD_NA_DALSI_LAJNU:
         switch (krok) {
-            case 0:  // Couvni
+            case 0: { // Couvni — ale nejdřív zkontroluj LiDARem dolů
+                if (souper_v_smeru(180.0f, 500.0f, 45.0f)) {
+                    Serial.println("[MOZEK] Lidar vidí soupeře pod námi! Otáčím zpět.");
+                    navigace.smer_doprava = !navigace.smer_doprava;
+                    posli_prikaz(CMD_OTOC_VLEVO, 180);
+                    krok = 10;
+                    break;
+                }
                 posli_prikaz(CMD_COUVEJ, 100);
                 krok = 1;
                 break;
-            case 1:  // Čekej na dokončení couvání → otoč DOLŮ
+            }
+            case 1:  // Čekej na couvání → otoč DOLŮ
                 if (rbcx_hotovo()) {
-                    // Otáčíme podle směru jízdy aby robot šel vždy DOLŮ:
-                    //   doleva  → VLEVO  (heading klesá → tváří se dolů)
-                    //   doprava → VPRAVO (heading roste → tváří se dolů)
                     if (navigace.smer_doprava)
                         posli_prikaz(CMD_OTOC_VPRAVO, 90);
                     else
@@ -658,40 +722,40 @@ void mozek_rozhoduj() {
                     krok = 2;
                 }
                 break;
-            case 2:  // Čekej na otočení
+            case 2:  // Čekej na otočení → jeď o šířku
                 if (rbcx_hotovo()) {
-                    posli_prikaz(CMD_JED_SBIREJ, 40);  // pomalá jízda o šířku
+                    posli_prikaz(CMD_JED_SBIREJ, 40);
+                    cas_krok_ms = millis();
                     krok = 3;
                 }
                 break;
-            case 3:  // Popojeď o šířku robota
+            case 3: { // Popojíždíme o šířku robota
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Soupeř na přechodu! Vracím se starou lajnou zpět.");
-                    if (navigace.smer_doprava) {
-                        posli_prikaz(CMD_OTOC_VPRAVO, 90);
-                    } else {
-                        posli_prikaz(CMD_OTOC_VLEVO, 90);
-                    }
+                    // Robot míří DOLŮ (180°). Otoč 90° zpět na lajnu:
+                    if (navigace.smer_doprava)
+                        posli_prikaz(CMD_OTOC_VPRAVO, 90);  // 180°→-90° (LEFT)
+                    else
+                        posli_prikaz(CMD_OTOC_VLEVO, 90);   // 180°→90° (RIGHT)
                     navigace.smer_doprava = !navigace.smer_doprava;
                     krok = 10;
                     break;
                 }
-
-                // Čekáme než ujedeme ~300mm (sledujeme SLAM pozici)
-                // TODO: sledovat ujetou vzdálenost přes SLAM
-                // Zatím zjednodušeně: čas
-                {
-                    static unsigned long cas_kroku3 = 0;
-                    if (cas_kroku3 == 0) cas_kroku3 = millis();
-                    if (millis() - cas_kroku3 > 2000) {  // ~2s při 40%
+                unsigned long cas_dolu = millis() - cas_krok_ms;
+                bool jsem_dole = (senzory.pozice_y <= BEZPECNA_VZDALENOST_ZDIE_Y + SIRKA_ROBOTA_MM);
+                if (cas_krok_ms > 0 && cas_dolu > 2000) {
+                    float tar_h = navigace.smer_doprava ? -90.0f : 90.0f;
+                    bool volno = !souper_v_smeru(tar_h, 600.0f, 45.0f);
+                    if (volno || jsem_dole || cas_dolu > 8000) {
                         posli_prikaz(CMD_STOP);
-                        cas_kroku3 = 0;
+                        cas_krok_ms = 0;
                         krok = 4;
                     }
                 }
                 break;
-            case 4:  // Druhé otočení (stejný směr — tváříme se na novou lajnu)
+            }
+            case 4:  // Druhé otočení
                 if (rbcx_hotovo()) {
                     if (navigace.smer_doprava)
                         posli_prikaz(CMD_OTOC_VPRAVO, 90);
@@ -700,16 +764,16 @@ void mozek_rozhoduj() {
                     krok = 5;
                 }
                 break;
-            case 5:  // Hotovo → nová lajna nebo domů
+            case 5:  // Hotovo → nová lajna
                 if (rbcx_hotovo()) {
                     dalsi_lajna();
                     nastav_cil_lajny();
                     posli_prikaz(CMD_JED_SBIREJ, 60);
+                    Serial.printf("[MOZEK] Lajna %s\n", navigace.smer_doprava ? "→" : "←");
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
-
-            case 10: // Dokončení otočky pro krok zpět
+            case 10: // Únik zpět
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
                     posli_prikaz(CMD_JED_SBIREJ, 60);
@@ -720,44 +784,70 @@ void mozek_rozhoduj() {
         break;
 
     // ──────────────────────────────────────────────────────
-    //  VYHÝBÁM SE SOUPEŘI
-    //  Soupeř stojí v cestě → zkrátíme lajnu, otočíme nahoru
-    //  a přeskočíme na další lajnu.
-    //    krok 0: Couvni 150mm
-    //    krok 1: Otoč nahoru 90° (vlevo/vpravo podle směru)
-    //    krok 2: Pokračuj na další lajně
+    //  VYHÝBÁM SE SOUPEŘI (1:1 se simulátorem)
     // ──────────────────────────────────────────────────────
     case STAV_VYHYBAM_SE_SOUPERI:
         switch (krok) {
-            case 0:
-                // 1. Natočení po směru dolů
+            case 0: {
+                bool ma_misto_dole = (senzory.pozice_y > BEZPECNA_VZDALENOST_ZDIE_Y + SIRKA_ROBOTA_MM);
+                if (!ma_misto_dole) {
+                    // U spodní stěny — nemůžeme dolů → otočíme se a jedeme zpět
+                    Serial.println("[MOZEK] Soupeř blokuje a nemám místo dolů! Otáčím zpět.");
+                    posli_prikaz(CMD_OTOC_VLEVO, 180);  // Robot míří po lajně, 180° otočí
+                    navigace.smer_doprava = !navigace.smer_doprava;
+                    krok = 10;
+                    break;
+                }
+                // Zkontroluj LiDARem dolů
+                if (souper_v_smeru(180.0f, 500.0f, 45.0f)) {
+                    Serial.println("[MOZEK] Lidar vidí soupeře pod námi! Vracím se starou lajnou.");
+                    navigace.smer_doprava = !navigace.smer_doprava;
+                    posli_prikaz(CMD_OTOC_VLEVO, 180);
+                    krok = 10;
+                    break;
+                }
+                // Natočení dolů
                 if (navigace.smer_doprava)
                     posli_prikaz(CMD_OTOC_VPRAVO, 90);
                 else
                     posli_prikaz(CMD_OTOC_VLEVO, 90);
                 krok = 1;
                 break;
+            }
             case 1:
-                // 2. Čekání na dotočení a jízda dolů o šířku robota
                 if (rbcx_hotovo()) {
                     posli_prikaz(CMD_JED_SBIREJ, 40);
+                    cas_krok_ms = millis();
                     krok = 2;
                 }
                 break;
-            case 2:
-                // 3. Zastavení po jízdě (odhad ~300 mm => ~1500 ms)
-                {
-                    static unsigned long cas_kroku2 = 0;
-                    if (cas_kroku2 == 0) cas_kroku2 = millis();
-                    if (millis() - cas_kroku2 > 1500) {
+            case 2: {
+                if (souper_v_ceste()) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.println("[MOZEK] Soupeř se připletl do úhybu! Vracím se.");
+                    // Robot míří DOLŮ (180°). Otoč 90° zpět na lajnu:
+                    if (navigace.smer_doprava)
+                        posli_prikaz(CMD_OTOC_VPRAVO, 90);  // 180°→-90° (LEFT)
+                    else
+                        posli_prikaz(CMD_OTOC_VLEVO, 90);   // 180°→90° (RIGHT)
+                    navigace.smer_doprava = !navigace.smer_doprava;
+                    krok = 10;
+                    break;
+                }
+                unsigned long cas_dolu_v = millis() - cas_krok_ms;
+                if (cas_krok_ms > 0 && cas_dolu_v > 1500) {
+                    float tar_h = navigace.smer_doprava ? 90.0f : -90.0f;
+                    if (!souper_v_smeru(tar_h, VZDALENOST_SOUPERE_VOLNO, 45.0f)) {
                         posli_prikaz(CMD_STOP);
-                        cas_kroku2 = 0;
+                        krok = 3;
+                    } else if (cas_dolu_v > 6000) {
+                        posli_prikaz(CMD_STOP);
                         krok = 3;
                     }
                 }
                 break;
+            }
             case 3:
-                // 4. Vrácení se zpět do původního kurzu
                 if (rbcx_hotovo()) {
                     if (navigace.smer_doprava)
                         posli_prikaz(CMD_OTOC_VLEVO, 90);
@@ -767,70 +857,60 @@ void mozek_rozhoduj() {
                 }
                 break;
             case 4:
-                // 5. Odjezd zpět jako předtím (JEDU nebo NAJEZD) a pokračování
                 if (rbcx_hotovo()) {
                     posli_prikaz(CMD_JED_SBIREJ, 60);
                     zmen_stav(stav_po_vyhybani);
+                }
+                break;
+            case 10: // Alternativní únik
+                if (rbcx_hotovo()) {
+                    nastav_cil_lajny();
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
         }
         break;
 
     // ──────────────────────────────────────────────────────
-    //  VRACÍM SE DOMŮ
-    //  Navigace k domácí zóně:
-    //    krok 0: Otoč se směrem k domovu
-    //    krok 1: Jeď domů
-    //    krok 2: Jsme tam → VYKLADAM
+    //  VRACÍM SE DOMŮ (couvání, 1:1 se simulátorem)
     // ──────────────────────────────────────────────────────
     case STAV_VRACIM_SE_DOMU:
         switch (krok) {
             case 0: { // Otoč se ZÁDY k domovu
-                // Úhel k domovu je senzory.domov_uhel_rel.
-                // Pro couvání chceme odchylku +180.
-                float dx = HOME_X - senzory.pozice_x;
-                float dy = HOME_Y - senzory.pozice_y;
-                float uhel_k_cili = atan2f(dx, dy) * 180.0f / M_PI;
-                // Relativní odchylka k cíli, MÍNUS 180 (chci couvat)
-                float uhel_couvani_rel = uhel_k_cili - senzory.heading - 180.0f;
-                // Normalizace na -180 až 180
-                while (uhel_couvani_rel > 180.0f) uhel_couvani_rel -= 360.0f;
-                while (uhel_couvani_rel <= -180.0f) uhel_couvani_rel += 360.0f;
-
-                if (abs(uhel_couvani_rel) > 10.0f) {
-                    if (uhel_couvani_rel >= 0)
-                        posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)abs(uhel_couvani_rel));
+                float rel_zacouvani = senzory.domov_uhel_rel - 180.0f;
+                while (rel_zacouvani > 180.0f) rel_zacouvani -= 360.0f;
+                while (rel_zacouvani <= -180.0f) rel_zacouvani += 360.0f;
+                if (fabsf(rel_zacouvani) > 10.0f) {
+                    int16_t uhel = (int16_t)fabsf(rel_zacouvani);
+                    if (rel_zacouvani >= 0)
+                        posli_prikaz(CMD_OTOC_VPRAVO, uhel);
                     else
-                        posli_prikaz(CMD_OTOC_VLEVO, (int16_t)abs(uhel_couvani_rel));
+                        posli_prikaz(CMD_OTOC_VLEVO, uhel);
                     krok = 1;
                 } else {
-                    krok = 2; // Už míříme zadkem
+                    krok = 2;
                 }
                 break;
             }
-            case 1:  // Čekej na otočení
+            case 1:
                 if (rbcx_hotovo()) krok = 2;
                 break;
-            case 2:  // Couvej k domovu
+            case 2:
                 posli_prikaz(CMD_COUVEJ, (int16_t)senzory.domov_vzdalenost);
                 krok = 3;
                 break;
-            case 3:  // Sleduj vzdálenost k domovu
+            case 3: {
                 if (senzory.domov_vzdalenost < 150.0f) {
-                    // Jsme zacouvaní doma!
+                    Serial.println("[MOZEK] Jsme zacouvani doma!");
                     posli_prikaz(CMD_STOP);
                     zmen_stav(STAV_VYKLADAM_PUKY);
-                    krok = 21; // Místo přeskočení jdeme na krok 21 (srovnání)
+                    krok = 21;
                 } else {
-                    // Kontrola driftu:
-                    float dx = HOME_X - senzory.pozice_x;
-                    float dy = HOME_Y - senzory.pozice_y;
-                    float uhel_k_cili = atan2f(dx, dy) * 180.0f / M_PI;
-                    float uhel_couvani_rel = uhel_k_cili - senzory.heading - 180.0f;
-                    while (uhel_couvani_rel > 180.0f) uhel_couvani_rel -= 360.0f;
-                    while (uhel_couvani_rel <= -180.0f) uhel_couvani_rel += 360.0f;
-
-                    if (abs(uhel_couvani_rel) > 20.0f) {
+                    float rel = senzory.domov_uhel_rel - 180.0f;
+                    while (rel > 180.0f) rel -= 360.0f;
+                    while (rel <= -180.0f) rel += 360.0f;
+                    if (fabsf(rel) > 20.0f) {
                         posli_prikaz(CMD_STOP);
                         krok = 0;  // znovu zamiř a couvej
                     }
@@ -840,144 +920,140 @@ void mozek_rozhoduj() {
         break;
 
     // ──────────────────────────────────────────────────────
-    //  VYKLÁDÁM PUKY
-    //  Dva scénáře podle směru poslední lajny:
-    //    A) DOLEVA: otoč 180°, jeď do HOME, dump
-    //    B) DOPRAVA: popojet do středu HOME, otoč vlevo, dump
-    //  Společný dump: otevři zásobníky + popojeď 30cm
+    //  VYKLÁDÁM PUKY (1:1 se simulátorem)
     // ──────────────────────────────────────────────────────
     case STAV_VYKLADAM_PUKY:
         switch (krok) {
             case 0:  // Urči cestu
                 if (!navigace.smer_doprava) {
-                    // Cesta A: Šli jsme DOLEVA → jsme u levé stěny
                     Serial.println("[MOZEK] Vyklad: cesta A (z levé strany)");
-                    posli_prikaz(CMD_OTOC_VPRAVO, 180);  // otoč k HOME
+                    posli_prikaz(CMD_OTOC_VPRAVO, 180);
                     krok = 10;
                 } else {
-                    // Cesta B: Šli jsme DOPRAVA → jsme v HOME
                     Serial.println("[MOZEK] Vyklad: cesta B (z pravé strany)");
-                    krok = 20;  // rovnou společně natočit
+                    krok = 20;
                 }
                 break;
 
             // === Cesta A: Z levé strany ===
-            case 10:  // Čekej na 180°
+            case 10:
                 if (rbcx_hotovo()) {
                     posli_prikaz(CMD_JED_SBIREJ, 60);
                     krok = 11;
                 }
                 break;
-            case 11:  // Jedeme do HOME zóny
-                if (senzory.pozice_x >= NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI) {
+            case 11:  // Jedeme do HOME, hlídáme soupeře
+                if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
-                    krok = 20;  // → Společně se správně natoč
+                    Serial.println("[MOZEK] Soupeř blokuje cestu domů! Čekám...");
+                    krok = 12;
+                } else if (senzory.pozice_x >= NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI) {
+                    posli_prikaz(CMD_STOP);
+                    krok = 20;
+                }
+                break;
+            case 12:  // Čekáme na uvolnění cesty
+                if (souper_volno()) {
+                    Serial.println("[MOZEK] Cesta volná, pokračuji domů.");
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    krok = 11;
                 }
                 break;
 
-            // === Společná fáze: Natočení nahoru a dump manévr ===
-            case 20: 
-                // Jsme v HOME a koukáme doprava (+X)
-                posli_prikaz(CMD_OTOC_VLEVO, 90);  // tvář nahoru
+            // === Společná fáze: Natočení nahoru a dump ===
+            case 20:
+                posli_prikaz(CMD_OTOC_VLEVO, 90);
                 krok = 21;
                 break;
-
             case 21:
                 if (rbcx_hotovo()) {
-                    // Místo čekání rovnou provedeme jemnou korekci orientace
                     float h_err = senzory.heading;
-                    if (abs(h_err) > 0.5f) {
-                        Serial.println("[MOZEK] Srovnávám orientaci před vyložením...");
+                    if (fabsf(h_err) > 0.5f) {
+                        Serial.println("[MOZEK] Srovnávám orientaci...");
                         if (h_err > 0)
                             posli_prikaz(CMD_OTOC_VLEVO, (int16_t)h_err);
                         else
-                            posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)abs(h_err));
+                            posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)fabsf(h_err));
                         krok = 22;
                     } else {
                         krok = 30;
                     }
                 }
                 break;
-
             case 22:
-                if (rbcx_hotovo()) {
-                    Serial.println("[MOZEK] Orientace srovnána (0.0°).");
-                    krok = 30;
-                }
+                if (rbcx_hotovo()) krok = 30;
                 break;
 
-            // === Společný dump: otevři → popojeď 30cm → zavři ===
-            case 30: 
-                Serial.println("[MOZEK] Otevírám zásobníky...");
-                posli_prikaz(CMD_VYLOZ);  // otevře zásobníky
-                krok = 31;
-                break;
-
-            case 31:  // Čekej na otevření
-                if (rbcx_hotovo()) {
-                    Serial.println("[MOZEK] Zásobníky otevřeny. Popojíždím 30 cm...");
-                    posli_prikaz(CMD_JED_SBIREJ, 40);  // pomalá jízda
-                    krok = 32;
-                }
-                break;
-
-            case 32: { // Jízda vpřed ~1.5s
-                static unsigned long t_start = 0;
-                static unsigned long t_zbyva = 1500;
-                if (t_start == 0) t_start = millis();
-
-                if (souper_v_ceste()) {
-                    posli_prikaz(CMD_STOP);
-                    t_zbyva -= (millis() - t_start);
-                    t_start = 0;
-                    Serial.println("[MOZEK] Soupeř při vykládání! Čekám na uvolnění...");
-                    krok = 35; // Čekání
+            case 30: {
+                // Kontrola: jsme opravdu v HOME zóně?
+                bool v_home_x = senzory.pozice_x >= NV_ARENA_SIZE - HOME_ZONA_MM;
+                bool v_home_y = senzory.pozice_y <= HOME_ZONA_MM;
+                if (!(v_home_x && v_home_y)) {
+                    Serial.printf("[MOZEK] Nejsem v HOME! (%.0f,%.0f) → DOMŮ\n", senzory.pozice_x, senzory.pozice_y);
+                    zmen_stav(STAV_VRACIM_SE_DOMU);
                     break;
                 }
-
-                if (millis() - t_start >= t_zbyva) {
-                    posli_prikaz(CMD_STOP);
-                    t_start = 0; // Reset pro příště
-                    t_zbyva = 1500;
-                    krok = 33;
-                }
+                Serial.println("[MOZEK] Otevírám zásobníky...");
+                posli_prikaz(CMD_VYLOZ);
+                krok = 31;
                 break;
             }
-
-            case 35: { // Čekáme až zmizí soupeř
-                if (!souper_v_ceste()) {
-                    Serial.println("[MOZEK] Soupeř pryč, pokračujeme ve vykládání...");
+            case 31:
+                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Zásobníky otevřeny. Popojíždím 30 cm...");
                     posli_prikaz(CMD_JED_SBIREJ, 40);
-                    krok = 32;
-                }
-                break;
-            }
-
-            case 33:  // Čekej na zastavení, pak zavři
-                if (rbcx_hotovo()) {
-                    Serial.println("[MOZEK] Zavírám zásobníky...");
-                    posli_prikaz(CMD_ZAVRI_ZASOBNIKY);
-                    krok = 34;
+                    cas_krok_ms = millis();
+                    vyklad_zbyva_ms = 1500;
+                    krok = 40;
                 }
                 break;
 
-            case 34:  // Čekej na zavření
-                if (rbcx_hotovo()) {
-                    Serial.println("[MOZEK] Puky vyloženy! ═══ PŘIPRAVENA NA DALŠÍ KOLO ═══");
-                    zmen_stav(STAV_CEKAM_NA_START); 
+            case 40:
+                if (souper_v_ceste()) {
+                    posli_prikaz(CMD_STOP);
+                    vyklad_zbyva_ms -= (millis() - cas_krok_ms);
+                    Serial.println("[MOZEK] Soupeř při vykládání! Čekám...");
+                    krok = 45;
+                } else if (cas_krok_ms > 0 && millis() - cas_krok_ms >= vyklad_zbyva_ms) {
+                    posli_prikaz(CMD_STOP);
+                    krok = 50;
                 }
+                break;
+
+            case 45:
+                if (souper_volno()) {
+                    Serial.println("[MOZEK] Soupeř pryč, pokračuji ve vykládání.");
+                    posli_prikaz(CMD_JED_SBIREJ, 40);
+                    cas_krok_ms = millis();
+                    krok = 40;
+                }
+                break;
+
+            case 50:
+                Serial.println("[MOZEK] Zavírám zásobníky...");
+                posli_prikaz(CMD_ZAVRI_ZASOBNIKY);
+                krok = 51;
+                break;
+
+            case 51:
+                if (rbcx_hotovo()) {
+                    Serial.printf("[MOZEK] Puky vyloženy! Pokryto %d/%d\n",
+                        POCET_BUNEK_X * POCET_BUNEK_Y - nepokrytych_bunek(),
+                        POCET_BUNEK_X * POCET_BUNEK_Y);
+                    krok = 60;
+                }
+                break;
+
+            case 60:
+                Serial.println("[MOZEK] ═══ PŘIPRAVENA NA DALŠÍ KOLO ═══");
+                uz_vylozil = true;
+                zmen_stav(STAV_CEKAM_NA_START);
                 break;
         }
         break;
 
     // ──────────────────────────────────────────────────────
-    //  NOUZOVÝ NÁVRAT
-    //  Čas končí! Jedeme domů co nejrychleji.
-    //  Stejné jako VRACIM_SE_DOMU ale vyšší rychlost.
-    //    krok 0: Otoč se k domovu
-    //    krok 1: Čekej na otočení
-    //    krok 2: Jeď
-    //    krok 3: Dojel → VYLOŽ
+    //  NOUZOVÝ NÁVRAT (1:1 se simulátorem)
     // ──────────────────────────────────────────────────────
     case STAV_NOUZOVY_NAVRAT:
         switch (krok) {
@@ -996,13 +1072,159 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) krok = 2;
                 break;
             case 2:
-                posli_prikaz(CMD_JED_SBIREJ, 90);  // plný plyn!
+                posli_prikaz(CMD_JED_SBIREJ, 90);
                 krok = 3;
                 break;
             case 3:
                 if (senzory.domov_vzdalenost < 150.0f) {
                     posli_prikaz(CMD_STOP);
                     zmen_stav(STAV_VYKLADAM_PUKY);
+                }
+                break;
+        }
+        break;
+
+    // ──────────────────────────────────────────────────────
+    //  PŘESUN Y — dynamický režim (1:1 se simulátorem)
+    // ──────────────────────────────────────────────────────
+    case STAV_PRESUN_Y:
+        switch (krok) {
+            case 0: {
+                float dy = dyn_y - senzory.pozice_y;
+                if (fabsf(dy) < 30.0f) {
+                    krok = 3;
+                    break;
+                }
+                float tar_h = (dy < 0) ? 180.0f : 0.0f;
+                float h_err = senzory.heading - tar_h;
+                while (h_err > 180.0f) h_err -= 360.0f;
+                while (h_err <= -180.0f) h_err += 360.0f;
+                Serial.printf("[MOZEK] Přesun Y: cíl=%.0f, aktuální=%.0f\n", dyn_y, senzory.pozice_y);
+                if (fabsf(h_err) > 3.0f) {
+                    if (h_err > 0) posli_prikaz(CMD_OTOC_VLEVO, (int16_t)fabsf(h_err));
+                    else posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)fabsf(h_err));
+                }
+                krok = 1;
+                break;
+            }
+            case 1:
+                if (rbcx_hotovo()) {
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    krok = 2;
+                }
+                break;
+            case 2: {
+                if (souper_v_ceste()) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.println("[MOZEK] Soupeř v cestě (PRESUN_Y)! Čekám...");
+                    krok = 20;
+                    break;
+                }
+                float dy = dyn_y - senzory.pozice_y;
+                if (fabsf(dy) <= 25.0f) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.printf("[MOZEK] Dosaženo Y=%.0f\n", senzory.pozice_y);
+                    krok = 3;
+                }
+                break;
+            }
+            case 20:
+                if (souper_volno()) {
+                    Serial.println("[MOZEK] Cesta Y volná, pokračuji.");
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    krok = 2;
+                }
+                break;
+            case 3:
+                if (rbcx_hotovo()) {
+                    zmen_stav(STAV_PRESUN_X);
+                }
+                break;
+        }
+        break;
+
+    // ──────────────────────────────────────────────────────
+    //  PŘESUN X — dynamický režim (1:1 se simulátorem)
+    // ──────────────────────────────────────────────────────
+    case STAV_PRESUN_X:
+        switch (krok) {
+            case 0: {
+                float d_start = fabsf(dyn_start_x - senzory.pozice_x);
+                float d_end = fabsf(dyn_end_x - senzory.pozice_x);
+                float target_x;
+                if (d_start < d_end) {
+                    target_x = dyn_start_x;
+                    navigace.smer_doprava = true;
+                    navigace.lajna_cil_x = dyn_end_x;
+                } else {
+                    target_x = dyn_end_x;
+                    navigace.smer_doprava = false;
+                    navigace.lajna_cil_x = dyn_start_x;
+                }
+                float dx = target_x - senzory.pozice_x;
+                Serial.printf("[MOZEK] Přesun X: cíl=%.0f, aktuální=%.0f\n", target_x, senzory.pozice_x);
+                if (fabsf(dx) < 30.0f) {
+                    krok = 3;
+                    break;
+                }
+                float tar_h = (dx > 0) ? 90.0f : -90.0f;
+                float h_err = senzory.heading - tar_h;
+                while (h_err > 180.0f) h_err -= 360.0f;
+                while (h_err <= -180.0f) h_err += 360.0f;
+                if (fabsf(h_err) > 3.0f) {
+                    if (h_err > 0) posli_prikaz(CMD_OTOC_VLEVO, (int16_t)fabsf(h_err));
+                    else posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)fabsf(h_err));
+                }
+                krok = 1;
+                break;
+            }
+            case 1:
+                if (rbcx_hotovo()) {
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    krok = 2;
+                }
+                break;
+            case 2: {
+                if (souper_v_ceste()) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.println("[MOZEK] Soupeř v cestě (PRESUN_X)! Čekám...");
+                    krok = 21;
+                    break;
+                }
+                float t_x = navigace.smer_doprava ? dyn_start_x : dyn_end_x;
+                float dx = t_x - senzory.pozice_x;
+                if (fabsf(dx) <= 25.0f) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.printf("[MOZEK] Dosaženo X=%.0f, startuji čištění k %.0f\n", senzory.pozice_x, navigace.lajna_cil_x);
+                    krok = 3;
+                }
+                break;
+            }
+            case 21:
+                if (souper_volno()) {
+                    Serial.println("[MOZEK] Cesta X volná, pokračuji.");
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    krok = 2;
+                }
+                break;
+            case 3: {
+                if (rbcx_hotovo()) {
+                    float tar_h = navigace.smer_doprava ? 90.0f : -90.0f;
+                    float h_err = senzory.heading - tar_h;
+                    while (h_err > 180.0f) h_err -= 360.0f;
+                    while (h_err <= -180.0f) h_err += 360.0f;
+                    if (fabsf(h_err) > 3.0f) {
+                        if (h_err > 0) posli_prikaz(CMD_OTOC_VLEVO, (int16_t)fabsf(h_err));
+                        else posli_prikaz(CMD_OTOC_VPRAVO, (int16_t)fabsf(h_err));
+                    }
+                    krok = 4;
+                }
+                break;
+            }
+            case 4:
+                if (rbcx_hotovo()) {
+                    posli_prikaz(CMD_JED_SBIREJ, 60);
+                    zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
         }
@@ -1047,6 +1269,36 @@ void mozek_rozhoduj() {
 }
 
 // =============================================================================
+//  START ZÁPASU (voláno zvenku — tlačítkem, UART, atd.)
+// =============================================================================
+
+void mozek_start_zapasu() {
+    if (stav != STAV_CEKAM_NA_START) return;
+
+    if (cas_startu == 0) {
+        // ═══ PRVNÍ START ═══
+        cas_startu = millis();
+        inicializuj_lajny();
+        dynamicky_rezim = false;
+        uz_vylozil = false;
+        Serial.println("[MOZEK] ═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══");
+        posli_prikaz(CMD_JED_SBIREJ, 60);
+        zmen_stav(STAV_NAJEZD_NAHORU);
+    } else {
+        // ═══ DRUHÝ A DALŠÍ START (dynamický režim) ═══
+        dynamicky_rezim = true;
+        int dummy_row;
+        if (vypocti_dalsi_cil(dyn_start_x, dyn_end_x, dyn_y, dummy_row)) {
+            Serial.printf("[MOZEK] ═══ DRUHÁ JÍZDA (DYNAMICKÁ) ═══\n");
+            Serial.printf("[MOZEK] Úsek: Y=%.0f, X=%.0f až %.0f\n", dyn_y, dyn_start_x, dyn_end_x);
+            zmen_stav(STAV_PRESUN_Y);
+        } else {
+            Serial.println("[MOZEK] Mapa už přejetá!");
+        }
+    }
+}
+
+// =============================================================================
 //  INIT & UPDATE
 // =============================================================================
 
@@ -1060,6 +1312,10 @@ void mozek_init() {
     stav = STAV_CEKAM_NA_START;
     krok = 0;
     cas_startu = 0;
+    dynamicky_rezim = false;
+    uz_vylozil = false;
+    cas_krok_ms = 0;
+    vyklad_zbyva_ms = 1500;
     inicializuj_lajny();
     Serial.println("[MOZEK] === MOZEK READY === čekám na start...");
 }

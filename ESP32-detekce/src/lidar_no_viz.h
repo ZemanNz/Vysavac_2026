@@ -20,7 +20,7 @@
 #define NV_LIDAR_RX 13
 #define NV_LIDAR_TX 10
 #define NV_MEM_LIFESPAN_FRAMES 500
-#define NV_ARENA_SIZE 1500.0f
+#define NV_ARENA_SIZE 2500.0f
 
 // === Zorné pole LiDARu (stupně) — které úhly bereme v potaz ===
 #define NV_FOV_MIN   5.0f    // spodní mez (°)
@@ -29,9 +29,9 @@
 // Korekční odchylka pro fyzické usazení lidaru (jemné ladění zrcadlové osy)
 static float angleOffset = 7.0f;
 
-// --- Pozice "domů" (pravý dolní roh, 30 cm od krajů) ---
-#define HOME_X  (NV_ARENA_SIZE - 500.0f)
-#define HOME_Y  500.0f
+// --- Pozice "domů" (pravý dolní roh, střed HOME zóny 700×700mm) ---
+#define HOME_X  (NV_ARENA_SIZE - 350.0f)
+#define HOME_Y  350.0f
 
 // ---- Interní stav (vlastní namespace pomocí nv_ prefixu) ----
 static const int NV_PACKET_SIZE = 47;

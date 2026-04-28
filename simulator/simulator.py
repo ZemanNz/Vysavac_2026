@@ -778,7 +778,13 @@ class Robot:
                 if self._sup_v_ceste():
                     self._cmd_stop()
                     self._log_msg("Soupeř na přechodu! Vracím se starou lajnou zpět.")
-                    self._cmd_otoc_vlevo(180)
+                    # Robot míří DOLŮ (180°). Otočíme 90° aby mířil zpět na lajnu:
+                    #   smer_doprava=True (šel doprava) → nový směr LEFT → otočit VPRAVO 90° (180°→-90°)
+                    #   smer_doprava=False (šel doleva) → nový směr RIGHT → otočit VLEVO 90° (180°→90°)
+                    if self.nav.smer_doprava:
+                        self._cmd_otoc_vpravo(90)
+                    else:
+                        self._cmd_otoc_vlevo(90)
                     self.nav.smer_doprava = not self.nav.smer_doprava
                     self.krok = 10
                     return
@@ -829,13 +835,11 @@ class Robot:
                 ma_misto_dole = (self.y > BEZPECNA_VZDALENOST_ZDIE_Y + SIRKA_ROBOTA_MM)
 
                 if not ma_misto_dole:
-                    # U spodní stěny — nemůžeme jít dolů, čekej na místě
-                    if self._sup_volno():
-                        # Soupeř se pohnul, můžeme pokračovat
-                        self._nastav_cil()
-                        self._cmd_jed(60)
-                        self._zmen(self._stav_po_vyhybani)
-                    # jinak stát a čekat (loop se zavolá znovu)
+                    # U spodní stěny — nemůžeme jít dolů → otočíme se a jedeme zpět
+                    self._log_msg("Soupeř blokuje a nemám místo dolů! Otáčím zpět.")
+                    self._cmd_otoc_vlevo(180)  # Robot míří po lajně, 180° otočí na opačný směr
+                    self.nav.smer_doprava = not self.nav.smer_doprava
+                    self.krok = 10
                     return
 
                 # Chceme zajet do další lajny - je to volné?
@@ -865,7 +869,11 @@ class Robot:
                 if self._sup_v_ceste():
                     self._cmd_stop()
                     self._log_msg("Soupeř se připletl do úhybu! Vracím se starou lajnou.")
-                    self._cmd_otoc_vlevo(180)
+                    # Robot míří DOLŮ (180°). Otočíme 90° aby mířil zpět na lajnu:
+                    if self.nav.smer_doprava:
+                        self._cmd_otoc_vpravo(90)
+                    else:
+                        self._cmd_otoc_vlevo(90)
                     self.nav.smer_doprava = not self.nav.smer_doprava
                     self.krok = 10
                     return
