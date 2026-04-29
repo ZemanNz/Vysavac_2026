@@ -1546,7 +1546,7 @@ def main():
             if ev.type == pygame.QUIT:
                 running = False
             elif ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_SPACE:
+                if ev.key == pygame.K_SPACE: # tady zaciname space
                     robot.start_zapasu()
 
                 elif ev.key == pygame.K_b:
@@ -1589,3 +1589,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+#tak jsem to cely precet....
