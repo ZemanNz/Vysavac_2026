@@ -65,6 +65,8 @@ static float nv_opp_gx = 0, nv_opp_gy = 0;
 
 // Nejkratší vzdálenost z lidaru přímo vpřed (předních 30 stupňů)
 static float nv_dist_front = 9999.0f;
+static float nv_acc_front_dist = 0.0f;
+static int nv_acc_front_count = 0;
 
 // ---------- Pomocné funkce ----------
 
@@ -87,9 +89,22 @@ static void nv_processPacket() {
 
         // Kalibrační oprava - fyzické zarovnání natočení
         a -= angleOffset;
-        // Pojistka na ošetření přetečení (pokud tam zatím žádnou nemáš)
         while (a >= 360.0f) a -= 360.0f;
         while (a < 0.0f) a += 360.0f;
+
+        // --- PŘÍMÝ SBĚR PŘEDNÍHO KUŽELU Z RAW DAT ---
+        // Převedeme úhel do -180..+180 pro snadnější podmínku
+        float a_front = a;
+        if (a_front > 180.0f) a_front -= 360.0f;
+        
+        // Přední 30° kužel (+-15 stupňů)
+        if (fabsf(a_front) <= 15.0f) {
+            if (d > 150 && d < 4000) {
+                nv_acc_front_dist += d;
+                nv_acc_front_count++;
+            }
+        }
+        // --------------------------------------------
 
         if (a>=NV_FOV_MIN && a<=NV_FOV_MAX && d>0 && nv_n_pts<500) {
             float r = a*(PI/180.0f);
@@ -316,22 +331,18 @@ void loop_lidar_nv() {
             rel_angle >= 0 ? 'R' : 'L');
     }
 
-    Serial.println();
-
     // ===================== Detekce vzdálenosti vpředu (pro bezpečné zastavení) =====================
-    float min_front_dist = 9999.0f;
-    for (int i = 0; i < nv_n_pts; i++) {
-        // Úhel k bodu od přímého směru (X). Vpřed je uhel 0.
-        float angle = atan2f(nv_pts[i].y, nv_pts[i].x) * 180.0f / PI;
-        // Chceme body v kuželu +-15 stupňů (celkem 30 stupňů)
-        if (fabsf(angle) <= 15.0f) {
-            float dist = sqrtf(nv_pts[i].x * nv_pts[i].x + nv_pts[i].y * nv_pts[i].y);
-            if (dist > 0 && dist < min_front_dist) {
-                min_front_dist = dist;
-            }
-        }
+    if (nv_acc_front_count > 5) {
+        // Průměrná hodnota filtruje náhodné "nuly" a vyžaduje shodu více paprsků
+        nv_dist_front = nv_acc_front_dist / nv_acc_front_count;
+    } else {
+        nv_dist_front = 9999.0f;
     }
-    nv_dist_front = min_front_dist;
+    
+    Serial.printf(" | FRONT %4dmm (pts: %2d)\n", (int)nv_dist_front, nv_acc_front_count);
 
+    // Reset pro další otočku
+    nv_acc_front_dist = 0.0f;
+    nv_acc_front_count = 0;
     nv_n_pts = 0;
 }

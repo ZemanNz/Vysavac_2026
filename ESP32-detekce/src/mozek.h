@@ -28,8 +28,8 @@
 // Rozměry robota (pro lajnovou navigaci)
 #define SIRKA_ROBOTA_MM       300.0f   // šířka robota = šířka jedné lajny
 #define DELKA_ROBOTA_MM       360.0f   // délka robota
-#define BEZPECNA_VZDALENOST_ZDI    (SIRKA_ROBOTA_MM / 2.0f + 100.0f)  // 250 mm (X osa)
-#define BEZPECNA_VZDALENOST_ZDIE_Y (DELKA_ROBOTA_MM / 2.0f + 100.0f)  // 280 mm (Y osa)
+#define BEZPECNA_VZDALENOST_ZDI    (SIRKA_ROBOTA_MM / 2.0f + 350.0f)  // Zvětšeno o 15cm
+#define BEZPECNA_VZDALENOST_ZDIE_Y (DELKA_ROBOTA_MM / 2.0f + 350.0f)  // Zvětšeno o 15cm
 #define HOME_ZONA_MM          700.0f
 #define MOZEK_HOME_X  (NV_ARENA_SIZE - HOME_ZONA_MM / 2.0f)
 #define MOZEK_HOME_Y  (HOME_ZONA_MM / 2.0f)
@@ -686,12 +686,14 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
+                    delay(3000);
                     posli_prikaz(CMD_OTOC_VLEVO, 90);
                     krok = 2;
                 }
                 break;
             case 2:
                 if (rbcx_hotovo()) {
+                    delay(3000);
                     nastav_cil_lajny();
                     posli_prikaz(CMD_JED_SBIREJ, 60);
                     Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
@@ -749,6 +751,7 @@ void mozek_rozhoduj() {
                     Serial.printf("[MOZEK] Lajna na dně Y=%.0f hotová → VYKLÁDÁM\n", senzory.pozice_y);
                     zmen_stav(STAV_VYKLADAM_PUKY);
                 }
+                cas_krok_ms = millis();
                 break;
             }
         }
@@ -773,6 +776,7 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
+                    delay(3000);
                     if (navigace.smer_doprava)
                         posli_prikaz(CMD_OTOC_VPRAVO, 90);
                     else
@@ -782,6 +786,7 @@ void mozek_rozhoduj() {
                 break;
             case 2:
                 if (rbcx_hotovo()) {
+                    delay(3000);
                     posli_prikaz(CMD_JED_SBIREJ, 40);
                     cas_krok_ms = millis(); // Nutné pro měření času jízdy dolů (case 3)
                     krok = 3;
@@ -795,7 +800,6 @@ void mozek_rozhoduj() {
                     else
                         posli_prikaz(CMD_OTOC_VLEVO, 90);
                     navigace.smer_doprava = !navigace.smer_doprava;
-                    cas_krok_ms = millis();
                     krok = 10;
                     break;
                 }
@@ -814,6 +818,7 @@ void mozek_rozhoduj() {
             }
             case 4:  // Druhé otočení
                 if (rbcx_hotovo()) {
+                    delay(3000);
                     if (navigace.smer_doprava)
                         posli_prikaz(CMD_OTOC_VPRAVO, 90);
                     else
@@ -823,6 +828,7 @@ void mozek_rozhoduj() {
                 break;
             case 5:  // Hotovo → nová lajna
                 if (rbcx_hotovo()) {
+                    delay(3000);
                     dalsi_lajna();
                     nastav_cil_lajny();
                     posli_prikaz(CMD_JED_SBIREJ, 60);
