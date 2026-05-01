@@ -97,7 +97,7 @@ struct SenzoroveData {
     char  domov_smer;         // 'L' nebo 'R'
 
     // Zdi / vzdálenosti
-    float dist_vpredu;        // mm - vzdálenost od nárazníku vpřed (±5°)
+    float dist_vpredu;        // mm - vzdálenost od nárazníku vpřed (±15°)
 
     // Soupeř
     bool  souper_viden;
@@ -1303,7 +1303,7 @@ void mozek_rozhoduj() {
     static unsigned long posledni_mapa = 0;
     if (millis() - posledni_debug > 1000) {
         posledni_debug = millis();
-        Serial.printf("[MOZEK] %s k=%d | t=%lus | RBCX:%s puky=%d | POS(%d,%d) H=%d° | HOME %dmm %d°%c | L%d/%d %s",
+        Serial.printf("[MOZEK] %s k=%d | t=%lus | RBCX:%s puky=%d | POS(%d,%d) H=%d° | FRONT %dmm (pts:%d) | HOME %dmm %d°%c | L%d/%d %s",
             jmeno_stavu(stav),
             krok,
             zbyva_ms / 1000,
@@ -1311,6 +1311,8 @@ void mozek_rozhoduj() {
             rbcx.pocet_puku,
             (int)senzory.pozice_x, (int)senzory.pozice_y,
             (int)senzory.heading,
+            (int)senzory.dist_vpredu,
+            nv_acc_front_count,
             (int)senzory.domov_vzdalenost,
             (int)senzory.domov_uhel,
             senzory.domov_smer,
