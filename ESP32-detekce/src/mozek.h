@@ -566,6 +566,9 @@ void zmen_stav(StavRobota novy) {
     cas_krok_ms = 0;
 }
 
+// Forward deklarace (definice je níže)
+void mozek_start_zapasu();
+
 void mozek_rozhoduj() {
     // Přijmi stav z RBCX (neblokující)
     prijmi_stav_rbcx();
@@ -596,9 +599,18 @@ void mozek_rozhoduj() {
     // ──────────────────────────────────────────────────────
     //  ČEKÁM NA START
     // ──────────────────────────────────────────────────────
-    case STAV_CEKAM_NA_START:
-        // Start se spouští voláním mozek_start_zapasu() zvenku
+    case STAV_CEKAM_NA_START: {
+        // Start se spouští tlačítkem UP na RBCX
+        static bool btn_up_predchozi = false;
+        bool btn_up_nyni = rbcx.tlacitko_vpredu_up;
+        // Detekce náběžné hrany (stisk, ne držení)
+        if (btn_up_nyni && !btn_up_predchozi && rbcx.pripojeno) {
+            Serial.println("[MOZEK] Tlačítko UP na RBCX → STARTUJI ZÁPAS!");
+            mozek_start_zapasu();
+        }
+        btn_up_predchozi = btn_up_nyni;
         break;
+    }
 
     // ──────────────────────────────────────────────────────
     //  NÁJEZD NAHORU
@@ -629,6 +641,17 @@ void mozek_rozhoduj() {
                     krok = 1;
                     break;
                 }
+
+                // Vypisování aktuální pozice pro debug
+                {
+                    static unsigned long posledni_vypis_najezd = 0;
+                    if (millis() - posledni_vypis_najezd > 250) {
+                        Serial.printf("[DEBUG NÁJEZD] Aktuální Y: %.0f (Cíl Y: %.0f)\n", 
+                                      senzory.pozice_y, navigace.lajna_y[0] - SIRKA_ROBOTA_MM / 2.0f);
+                        posledni_vypis_najezd = millis();
+                    }
+                }
+
                 // Jedeme nahoru — čekáme než Y dosáhne lajny 0
                 if (senzory.pozice_y >= navigace.lajna_y[0] - SIRKA_ROBOTA_MM / 2.0f) {
                     posli_prikaz(CMD_STOP);
@@ -916,6 +939,7 @@ void mozek_rozhoduj() {
                     }
                 }
                 break;
+            }
         }
         break;
 

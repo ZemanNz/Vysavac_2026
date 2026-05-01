@@ -12,13 +12,15 @@
 //  VLÁKNO 1 (hlavní): while(true) — vykonává pohyby podle příkazů
 //  VLÁKNO 2 (UART):   přijímá příkazy z ESP32, odesílá stav
 //
+//  Komunikační protokol MUSÍ odpovídat mozek.h na ESP32 (Master)!
+//
 // =============================================================================
 
 char nase_barva = 'R';
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
 // =============================================================================
-//  KOMUNIKAČNÍ PROTOKOL
+//  KOMUNIKAČNÍ PROTOKOL (1:1 s mozek.h!)
 // =============================================================================
 
 // --- ESP32 → RBCX (3 bajty) ---
@@ -35,35 +37,37 @@ typedef struct __attribute__((packed)) {
     int16_t param;        // Doplňkový parametr (záleží na kontextu)
 } RbcxStatus;
 
-// Příkazy (ESP32 → RBCX)
+// Příkazy (ESP32 → RBCX) — MUSÍ odpovídat CmdID v mozek.h!
 enum CmdID : uint8_t {
-    CMD_NOP           = 0x00,  // Nic nedělej (jen pošli stav)
-    CMD_STOP          = 0x01,  // Zastav vše
-    CMD_JED_SBIREJ    = 0x02,  // Jeď dopředu + sbírej (param = rychlost %)
-    CMD_OTOC_VLEVO    = 0x03,  // Otoč se doleva (param = úhel °)
-    CMD_OTOC_VPRAVO   = 0x04,  // Otoč se doprava (param = úhel °)
-    CMD_COUVEJ        = 0x05,  // Couvej (param = vzdálenost mm)
-    CMD_VYLOZ         = 0x06,  // Vyložení puků
+    CMD_NOP             = 0x00,  // Nic nedělej (jen pošli stav)
+    CMD_STOP            = 0x01,  // Zastav vše
+    CMD_JED_SBIREJ      = 0x02,  // Jeď dopředu + sbírej (param = rychlost %)
+    CMD_OTOC_VLEVO      = 0x03,  // Otoč se doleva (param = úhel °)
+    CMD_OTOC_VPRAVO     = 0x04,  // Otoč se doprava (param = úhel °)
+    CMD_COUVEJ          = 0x05,  // Couvej (param = vzdálenost mm)
+    CMD_VYLOZ           = 0x06,  // Otevření zásobníků (jen otevři!)
+    CMD_ZAVRI_ZASOBNIKY = 0x07,  // Zavření zásobníků + reset počtu puků
 };
 
-// Statusy (RBCX → ESP32)
+// Statusy (RBCX → ESP32) — MUSÍ odpovídat StatID v mozek.h!
 enum StatID : uint8_t {
-    STAT_READY        = 0x80,
-    STAT_BUSY         = 0x81,
-    STAT_DONE         = 0x82,
+    STAT_READY = 0x80,
+    STAT_BUSY  = 0x81,
+    STAT_DONE  = 0x82,
 };
 
 // Helper: jméno příkazu pro výpis
 const char* cmd_name(uint8_t cmd) {
     switch(cmd) {
-        case CMD_NOP:        return "NOP";
-        case CMD_STOP:       return "STOP";
-        case CMD_JED_SBIREJ: return "JED_SBIREJ";
-        case CMD_OTOC_VLEVO: return "OTOC_VLEVO";
-        case CMD_OTOC_VPRAVO:return "OTOC_VPRAVO";
-        case CMD_COUVEJ:     return "COUVEJ";
-        case CMD_VYLOZ:      return "VYLOZ";
-        default:             return "???";
+        case CMD_NOP:             return "NOP";
+        case CMD_STOP:            return "STOP";
+        case CMD_JED_SBIREJ:      return "JED_SBIREJ";
+        case CMD_OTOC_VLEVO:      return "OTOC_VLEVO";
+        case CMD_OTOC_VPRAVO:     return "OTOC_VPRAVO";
+        case CMD_COUVEJ:          return "COUVEJ";
+        case CMD_VYLOZ:           return "VYLOZ";
+        case CMD_ZAVRI_ZASOBNIKY: return "ZAVRI_ZASOBNIKY";
+        default:                  return "???";
     }
 }
 const char* stav_name(uint8_t s) {
@@ -113,7 +117,7 @@ void posli_stav(int16_t extra_param = 0) {
 }
 
 // =============================================================================
-//  UART VLÁKNO
+//  UART VLÁKNO — příjem příkazů z ESP32 + periodický stav
 // =============================================================================
 
 void uart_vlakno(void *pvParameters) {
@@ -129,6 +133,7 @@ void uart_vlakno(void *pvParameters) {
             if (cmd.cmd == CMD_NOP) {
                 posli_stav();
             } else {
+                // Pokud přijde nový příkaz a jedeme, zastav
                 zastav_jizdu = true;
                 aktivni_prikaz = cmd.cmd;
                 aktivni_param  = cmd.param;
@@ -209,6 +214,7 @@ void setup() {
                     rkLedYellow(true);
                     zastav_jizdu = false;
                     aktualni_stav = STAT_BUSY;
+                    posli_stav();
                     Serial.printf(">> Jedu dopredu na %d%% a sbiram puky...\n", param);
                     
                     jed_a_sbirej((float)param);
@@ -222,6 +228,7 @@ void setup() {
 
                 case CMD_OTOC_VLEVO:
                     aktualni_stav = STAT_BUSY;
+                    posli_stav();
                     Serial.printf(">> Otacim se VLEVO o %d stupnu...\n", param);
                     turn_on_spot_left((float)param, 30);
                     Serial.println(">> Otoceno VLEVO.");
@@ -232,6 +239,7 @@ void setup() {
 
                 case CMD_OTOC_VPRAVO:
                     aktualni_stav = STAT_BUSY;
+                    posli_stav();
                     Serial.printf(">> Otacim se VPRAVO o %d stupnu...\n", param);
                     turn_on_spot_right((float)param, 30);
                     Serial.println(">> Otoceno VPRAVO.");
@@ -242,6 +250,7 @@ void setup() {
 
                 case CMD_COUVEJ:
                     aktualni_stav = STAT_BUSY;
+                    posli_stav();
                     Serial.printf(">> Couvam o %d mm...\n", param);
                     backward_acc((float)param, 40);
                     Serial.println(">> Couvnuto.");
@@ -250,13 +259,33 @@ void setup() {
                     aktualni_stav = STAT_READY;
                     break;
 
+                // ─────────────────────────────────────────────────
+                //  VYLOZ — jen OTEVŘE zásobníky (mozek.h pak posílá
+                //  CMD_JED_SBIREJ pro popojíždění a CMD_ZAVRI_ZASOBNIKY
+                //  pro uzavření)
+                // ─────────────────────────────────────────────────
                 case CMD_VYLOZ:
                     aktualni_stav = STAT_BUSY;
-                    Serial.println(">> Vykladam puky...");
+                    posli_stav();
+                    Serial.println(">> Otviram zasobniky...");
                     otevri_nas();
-                    delay(1000);
+                    delay(300);  // krátká pauza pro mechaniku
+                    Serial.println(">> Zasobniky otevreny.");
+                    aktualni_stav = STAT_DONE;
+                    posli_stav();
+                    aktualni_stav = STAT_READY;
+                    break;
+
+                // ─────────────────────────────────────────────────
+                //  ZAVRI_ZASOBNIKY — zavře zásobníky + resetuje počet
+                // ─────────────────────────────────────────────────
+                case CMD_ZAVRI_ZASOBNIKY:
+                    aktualni_stav = STAT_BUSY;
+                    posli_stav();
+                    Serial.println(">> Zaviram zasobniky...");
                     zavri_nas();
-                    Serial.printf(">> Vylozeno %d puku. Reset.\n", pocet_nasich_puku);
+                    delay(300);  // krátká pauza pro mechaniku
+                    Serial.printf(">> Zasobniky zavreny. Vylozeno %d puku. Reset.\n", pocet_nasich_puku);
                     pocet_nasich_puku = 0;
                     aktualni_stav = STAT_DONE;
                     posli_stav();
