@@ -29,9 +29,10 @@ typedef struct __attribute__((packed)) {
     int16_t param;
 } EspCommand;
 
-// --- RBCX → ESP32 (6 bajtů) ---
+// --- RBCX → ESP32 (7 bajtů) ---
 typedef struct __attribute__((packed)) {
     uint8_t status;       // STAT_READY / STAT_BUSY / STAT_DONE
+    uint8_t cmd_id;       // Potvrzení: k jakému příkazu se stav váže
     uint8_t buttons;      // Bit 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT
     int16_t pocet_puku;   // Počet nasbíraných puků naší barvy
     int16_t param;        // Doplňkový parametr (záleží na kontextu)
@@ -97,6 +98,7 @@ RbcxStatus sestav_stav(int16_t extra_param = 0) {
     
     RbcxStatus s;
     s.status = aktualni_stav;
+    s.cmd_id = aktivni_prikaz; // Echos the currently executing/finished command
     
     // Tlačítka jako bitová maska
     s.buttons = 0;

@@ -63,6 +63,9 @@ static bool nv_mem_locked = false;
 static bool nv_opp_valid = false;
 static float nv_opp_gx = 0, nv_opp_gy = 0;
 
+// Nejkratší vzdálenost z lidaru přímo vpřed (předních 30 stupňů)
+static float nv_dist_front = 9999.0f;
+
 // ---------- Pomocné funkce ----------
 
 // Lokální → globální transformace
@@ -314,6 +317,21 @@ void loop_lidar_nv() {
     }
 
     Serial.println();
+
+    // ===================== Detekce vzdálenosti vpředu (pro bezpečné zastavení) =====================
+    float min_front_dist = 9999.0f;
+    for (int i = 0; i < nv_n_pts; i++) {
+        // Úhel k bodu od přímého směru (X). Vpřed je uhel 0.
+        float angle = atan2f(nv_pts[i].y, nv_pts[i].x) * 180.0f / PI;
+        // Chceme body v kuželu +-15 stupňů (celkem 30 stupňů)
+        if (fabsf(angle) <= 15.0f) {
+            float dist = sqrtf(nv_pts[i].x * nv_pts[i].x + nv_pts[i].y * nv_pts[i].y);
+            if (dist > 0 && dist < min_front_dist) {
+                min_front_dist = dist;
+            }
+        }
+    }
+    nv_dist_front = min_front_dist;
 
     nv_n_pts = 0;
 }
