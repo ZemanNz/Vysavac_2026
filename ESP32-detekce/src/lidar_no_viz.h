@@ -9,7 +9,7 @@
 // ============================================================
 
 // === Rozměry robota a poloha LiDARu ===
-#define NV_ROBOT_LENGTH_MM   350.0f
+#define NV_ROBOT_LENGTH_MM   360.0f
 #define NV_ROBOT_WIDTH_MM    300.0f
 #define NV_LIDAR_FROM_FRONT   40.0f
 #define NV_LIDAR_FRONT_EDGE  ( NV_LIDAR_FROM_FRONT)
@@ -97,9 +97,10 @@ static void nv_processPacket() {
         float a_front = a;
         if (a_front > 180.0f) a_front -= 360.0f;
         
-        // Přední 30° kužel (+-15 stupňů)
-        if (fabsf(a_front) <= 15.0f) {
-            if (d > 150 && d < 4000) {
+        // Přední 30° kužel (střed na 90°, tj. +-15 stupňů)
+        // V lokálních souřadnicích je 90° směr vpřed (+Y)
+        if (fabsf(a_front - 90.0f) <= 15.0f) {
+            if (d > 40 && d < 4000) {
                 nv_acc_front_dist += d;
                 nv_acc_front_count++;
             }
@@ -332,14 +333,16 @@ void loop_lidar_nv() {
     }
 
     // ===================== Detekce vzdálenosti vpředu (pro bezpečné zastavení) =====================
-    if (nv_acc_front_count > 5) {
+    if (nv_acc_front_count > 0) {
         // Průměrná hodnota filtruje náhodné "nuly" a vyžaduje shodu více paprsků
-        nv_dist_front = nv_acc_front_dist / nv_acc_front_count;
+        // Odečítáme NV_LIDAR_FROM_FRONT, aby nv_dist_front byla vzdálenost OD NÁRAZNÍKU
+        nv_dist_front = (nv_acc_front_dist / nv_acc_front_count) - NV_LIDAR_FROM_FRONT;
+        if (nv_dist_front < 0) nv_dist_front = 0; 
     } else {
         nv_dist_front = 9999.0f;
     }
     
-    Serial.printf(" | FRONT %4dmm (pts: %2d)\n", (int)nv_dist_front, nv_acc_front_count);
+    Serial.printf(" | FRONT %4dmm (bumper, pts: %2d)\n", (int)nv_dist_front, nv_acc_front_count);
 
     // Reset pro další otočku
     nv_acc_front_dist = 0.0f;

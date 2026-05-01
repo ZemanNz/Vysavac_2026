@@ -29,6 +29,7 @@ except Exception as e:
     print(f"[ERR] {e}"); sys.exit(1)
 
 rob_x, rob_y, rob_h = 500.0, 500.0, 0.0
+rob_dist_front = 9999.0
 points, lines, opps = [], [], []
 
 # --- Domovska pozice (pravy dolni roh, offsetovano o 300mm od kazde steny) ---
@@ -81,7 +82,7 @@ def draw(surf):
     r  = math.radians(rob_h)
     cr = math.cos(r); sr = math.sin(r)
     # (lx=lokální X=vpravo, ly=lokální Y=vpřed)
-    robot_corners_local = [(-150, 40), (150, 40), (150, -310), (-150, -310)]
+    robot_corners_local = [(-150, 40), (150, 40), (150, -320), (-150, -320)]
     corners = []
     for lx, ly in robot_corners_local:
         # Transformace: globální = lidar_pos + lx*pravý + ly*vpřed
@@ -92,10 +93,22 @@ def draw(surf):
     pygame.draw.polygon(surf, (0,120,255), corners, 3)
     # LiDAR bod (tyrkysová tečka)
     pygame.draw.circle(surf, (0,200,255), ts(rob_x, rob_y), 5)
-    # Šipka vpřed (8 cm = 1/5 původní) od LiDARu
+    # Šipka vpřed (8 cm) od LiDARu
     al = 80.0
     pygame.draw.line(surf, (0,255,200), ts(rob_x, rob_y),
                      ts(rob_x + al*sr, rob_y + al*cr), 3)
+
+    # --- Kužel vzdálenosti vpředu (±15°) ---
+    cone_len = 150.0  # délka čar kuželu v mm
+    for ang in [-15, 15]:
+        ar = math.radians(rob_h + ang)
+        pygame.draw.line(surf, (255, 255, 0), ts(rob_x, rob_y), 
+                         ts(rob_x + cone_len*math.sin(ar), rob_y + cone_len*math.cos(ar)), 1)
+    
+    if rob_dist_front < 9000:
+        # Vykreslení hodnoty u nárazníku
+        dist_txt = font.render(f"{int(rob_dist_front)}mm", True, (255,255,0))
+        surf.blit(dist_txt, ts(rob_x + 50*sr + 20*cr, rob_y + 50*cr - 20*sr))
 
     # --- Domovska pozice: krizek + navigacni cara ---
     hp = ts(HOME_X, HOME_Y)
@@ -176,6 +189,9 @@ while run:
                 ox,oy = struct.unpack('<hh', pay)
                 if -MARGIN<=ox<=ARENA_SIZE+MARGIN and -MARGIN<=oy<=ARENA_SIZE+MARGIN:
                     opps.append((ox,oy,now))
+            elif mt == 4 and ml == 2:
+                df, = struct.unpack('<h', pay)
+                rob_dist_front = float(df)
         buf = buf[tot:]
 
     draw(screen)

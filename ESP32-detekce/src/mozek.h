@@ -97,7 +97,7 @@ struct SenzoroveData {
     char  domov_smer;         // 'L' nebo 'R'
 
     // Zdi / vzdálenosti
-    float dist_vpredu;        // mm - nejkratší vzdálenost z lidaru vpřed (±15°)
+    float dist_vpredu;        // mm - vzdálenost od nárazníku vpřed (±5°)
 
     // Soupeř
     bool  souper_viden;
@@ -671,11 +671,11 @@ void mozek_rozhoduj() {
                     break;
                 }
 
-                // Pojistka z lidaru: jaká je fyzická vzdálenost lidaru od zdi?
-                float limit_dist_lidar_y = BEZPECNA_VZDALENOST_ZDIE_Y - (DELKA_ROBOTA_MM / 2.0f) + NV_LIDAR_FROM_FRONT; 
+                // Pojistka z lidaru: jaká je fyzická vzdálenost nárazníku od zdi?
+                float limit_dist_bumper_y = BEZPECNA_VZDALENOST_ZDIE_Y - (DELKA_ROBOTA_MM / 2.0f); 
                 
                 bool dojeli_pozice = (senzory.pozice_y >= navigace.lajna_y[0] - SIRKA_ROBOTA_MM / 2.0f);
-                bool dojeli_lidar  = (senzory.dist_vpredu <= limit_dist_lidar_y);
+                bool dojeli_lidar  = (senzory.dist_vpredu <= limit_dist_bumper_y);
 
                 if (dojeli_pozice || dojeli_lidar) {
                     posli_prikaz(CMD_STOP);
@@ -739,8 +739,8 @@ void mozek_rozhoduj() {
         // [D] Blízko protější zdi
         {
             bool limit_x = dosahli_konce_lajny();
-            float limit_dist_lidar_x = BEZPECNA_VZDALENOST_ZDI - (DELKA_ROBOTA_MM / 2.0f) + NV_LIDAR_FROM_FRONT;
-            bool limit_lidar = (senzory.dist_vpredu <= limit_dist_lidar_x);
+            float limit_dist_bumper_x = BEZPECNA_VZDALENOST_ZDI - (DELKA_ROBOTA_MM / 2.0f);
+            bool limit_lidar = (senzory.dist_vpredu <= limit_dist_bumper_x);
 
             if (limit_x || limit_lidar) {
                 posli_prikaz(CMD_STOP);

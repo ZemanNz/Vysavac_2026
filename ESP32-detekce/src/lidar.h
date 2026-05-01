@@ -4,7 +4,7 @@
 
 // === Rozměry robota a poloha LiDARu ===
 // LiDAR je fyzický střed SLAM souřadnic – vše se měří od něj
-#define ROBOT_LENGTH_MM   350.0f   // Délka robota (směr vpřed = lokální +Y)
+#define ROBOT_LENGTH_MM   360.0f   // Délka robota (směr vpřed = lokální +Y)
 #define ROBOT_WIDTH_MM    300.0f   // Šířka robota (lokální ±X)
 #define LIDAR_FROM_FRONT   40.0f   // LiDAR je 40 mm od přední hrany
 // Vzdálenosti od LiDARu k okrajům těla robota (lokální souřadnice)
@@ -53,6 +53,9 @@ static float h_sin_avg = 0.0f, h_cos_avg = 1.0f;
 float mem_nx = 0, mem_ny = 0;
 int mem_consistent = 0;
 bool mem_locked = false;
+static float dist_front = 9999.0f;
+static float acc_front_dist = 0.0f;
+static int acc_front_count = 0;
 
 // --- Protokol: 0xBB 0x55 | type | len | payload | checksum ---
 void send_frame(int16_t rx, int16_t ry, int16_t hd) {
@@ -88,6 +91,13 @@ void send_opp(int16_t x, int16_t y) {
     b[8]=(b[2]+b[3]+b[4]+b[5]+b[6]+b[7])&0xFF;
     Serial.write(b,9);
 }
+void send_dist_front(int16_t dist) {
+    uint8_t b[7];
+    b[0]=0xBB; b[1]=0x55; b[2]=4; b[3]=2;
+    b[4]=dist&0xFF; b[5]=(dist>>8)&0xFF;
+    b[6]=(b[2]+b[3]+b[4]+b[5])&0xFF;
+    Serial.write(b,7);
+}
 
 // Lokalni → globalni transformace (CW konvence)
 // gx = rx + lx*cos(h) + ly*sin(h)
@@ -112,6 +122,16 @@ void processPacket() {
         // Pojistka na ošetření přetečení (pokud tam zatím žádnou nemáš)
         while (a >= 360.0f) a -= 360.0f;
         while (a < 0.0f) a += 360.0f;
+
+        // --- Detekce vzdálenosti vpředu (±15° kolem 90°) ---
+        float a_front = a;
+        if (a_front > 180.0f) a_front -= 360.0f;
+        if (fabsf(a_front - 90.0f) <= 15.0f) {
+            if (d > 40 && d < 4000) {
+                acc_front_dist += d;
+                acc_front_count++;
+            }
+        }
 
         if (a>=FOV_MIN && a<=FOV_MAX && d>0 && n_pts<500) {
             float r = a*(PI/180.0f);
@@ -311,6 +331,16 @@ void loop_lidar() {
         l2g(bsx/bo, bsy/bo, gx, gy);
         send_opp(gx, gy);
     }
+
+    // === Vzdálenost vpředu ===
+    if (acc_front_count > 0) {
+        dist_front = (acc_front_dist / acc_front_count) - LIDAR_FROM_FRONT;
+        if (dist_front < 0) dist_front = 0;
+    } else {
+        dist_front = 9999.0f;
+    }
+    send_dist_front((int16_t)dist_front);
+    acc_front_dist = 0; acc_front_count = 0;
 
     n_pts = 0;
 }

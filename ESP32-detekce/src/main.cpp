@@ -9,8 +9,8 @@
 //    USE_MOZEK  1  →  zapnout rozhodovací logiku + UART k RBCX (mozek.h)
 //                     (vyžaduje USE_VIZ 0)
 // ============================================================
-#define USE_VIZ    0
-#define USE_MOZEK  1
+#define USE_VIZ    1
+#define USE_MOZEK  0
 
 #if USE_VIZ
     #include "lidar.h"
