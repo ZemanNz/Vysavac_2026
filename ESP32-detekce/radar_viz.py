@@ -7,7 +7,7 @@ FADE_MS    = 600
 BG         = (15, 15, 15)
 
 # === VELIKOST ARÉNY (mm) — ZMĚŇ TADY ===
-ARENA_SIZE = 1500.0
+ARENA_SIZE = 2500.0
 
 MARGIN     = ARENA_SIZE * 0.25   # okraj kolem arény pro vizualizaci
 WIN        = 900

@@ -17,7 +17,7 @@
 #define LIDAR_RX 13
 #define LIDAR_TX 10
 #define MEM_LIFESPAN_FRAMES 500
-#define ARENA_SIZE 1500.0f
+#define ARENA_SIZE 2500.0f
 
 // === Zorné pole LiDARu (stupně) — které úhly bereme v potaz ===
 #define FOV_MIN   5.0f    // spodní mez (°)
