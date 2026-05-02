@@ -40,6 +40,7 @@ void setup() {
 
     #if USE_TEST && !USE_VIZ
         test_pohybu_init();
+        test_pohybu_sekvence();
     #endif
 }
 
@@ -55,11 +56,5 @@ void loop() {
     #endif
 
     #if USE_TEST && !USE_VIZ
-        static bool test_hotov = false;
-        if (!test_hotov) {
-            test_pohybu_sekvence();
-            test_hotov = true;
-        }
-        kontroluj_zarovnavani();
     #endif
 }

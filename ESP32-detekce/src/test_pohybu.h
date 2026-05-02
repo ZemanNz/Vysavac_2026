@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // =============================================================================
-//  TEST POHYBU A ZAROVNÁNÍ (Řízení "shora" z ESP32)
+//  TEST POHYBU A ZAROVNÁNÍ (Blokující přístup)
 //  Tento soubor dočasně nahrazuje mozek.h pro testování rotace podle LiDARu.
 // =============================================================================
 
@@ -23,7 +23,6 @@ enum CmdIDTest : uint8_t {
     CMD_JED_SBIREJ      = 0x02,
     CMD_OTOC_VLEVO      = 0x03,
     CMD_OTOC_VPRAVO     = 0x04,
-    // Nový příkaz: zapne motory a nechá je točit, dokud ESP32 nepošle CMD_STOP
     CMD_TOC_KONTINUALNE = 0x08 
 };
 
@@ -43,18 +42,8 @@ void test_posli_prikaz(uint8_t cmd, int16_t param = 0) {
 }
 
 // =============================================================================
-//  STAVOVÉ PROMĚNNÉ A KONFIGURACE
+//  KONFIGURACE (vráceny původní funkční rychlosti 10 a 3)
 // =============================================================================
-
-enum TestStav {
-    TEST_IDLE,
-    TEST_CEKAM_NA_TLA,
-    TEST_TOCIM_SE,
-    TEST_HOTOVO
-};
-
-static TestStav t_stav = TEST_CEKAM_NA_TLA;
-static float cilovy_uhel = 0.0f;
 
 static float T_TOLERANCE_DEG  = 2.5f;
 static float T_SLOWDOWN_DEG   = 12.0f;
@@ -62,10 +51,9 @@ static int16_t T_CRUISE_SPEED = 10;
 static int16_t T_SLOW_SPEED   = 3;
 
 // =============================================================================
-//  POMOCNÉ FUNKCE
+//  POMOCNÉ MATEMATICKÉ FUNKCE
 // =============================================================================
 
-// Pomocná funkce pro výpočet nejkratšího rozdílu mezi úhly (-180 až 180)
 float vypocti_rozdil_uhlu(float cil, float aktualni) {
     float r = cil - aktualni;
     while (r > 180.0f) r -= 360.0f;
@@ -73,7 +61,6 @@ float vypocti_rozdil_uhlu(float cil, float aktualni) {
     return r;
 }
 
-// Funkce, která najde nejbližší "rovnoběžný" úhel vzhledem ke zdem (0, 90, 180, 270)
 float najdi_nejblizsi_rovnobezku(float aktualni_heading_deg) {
     float a = aktualni_heading_deg;
     while (a < 0) a += 360.0f;
@@ -85,107 +72,96 @@ float najdi_nejblizsi_rovnobezku(float aktualni_heading_deg) {
     return 270.0f;
 }
 
-void test_start_otoceni(float target_deg) {
-    float heading_deg = nv_g_h * 180.0f / PI;
-    cilovy_uhel = target_deg;
-    while (cilovy_uhel < 0) cilovy_uhel += 360.0f;
-    while (cilovy_uhel >= 360.0f) cilovy_uhel -= 360.0f;
-
-    Serial.printf("[TEST] Start otoceni. Aktualni: %.1f°, Cil: %.1f°\n", heading_deg, cilovy_uhel);
-    float rozdil = vypocti_rozdil_uhlu(cilovy_uhel, heading_deg);
-    test_posli_prikaz(CMD_TOC_KONTINUALNE, (rozdil > 0) ? T_CRUISE_SPEED : -T_CRUISE_SPEED);
-    t_stav = TEST_TOCIM_SE;
-}
-// Otočí se o 90 stupňů (nebo 0 pro zarovnání) vzhledem k nejbližší "čisté" rovnoběžce
-void otoc_o_90(bool vlevo, bool jen_zarovnat = false) {
-    float heading_deg = nv_g_h * 180.0f / PI;
-    float base = najdi_nejblizsi_rovnobezku(heading_deg);
-    float target = base;
-    if (!jen_zarovnat) target += vlevo ? -90.0f : 90.0f;
-    test_start_otoceni(target);
-}
-// Vyrovná se podle nejbližší rovnoběžné stěny (0, 90, 180, 270)
-void zarovnej_podle_steny() {
-    otoc_o_90(false, true); // Použijeme pomocnou pro zarovnání (relativní 0)
-}
-
-void kontroluj_zarovnavani() {
-    if (t_stav == TEST_TOCIM_SE) {
-        float heading_deg = nv_g_h * 180.0f / PI;
-        float rozdil = vypocti_rozdil_uhlu(cilovy_uhel, heading_deg);
-        
-        static int16_t last_sent_speed = 0;
-        
-        int16_t target_speed = (rozdil > 0) ? T_CRUISE_SPEED : -T_CRUISE_SPEED;
-        if (fabs(rozdil) <= T_SLOWDOWN_DEG) {
-            target_speed = (rozdil > 0) ? T_SLOW_SPEED : -T_SLOW_SPEED;
-        }
-
-        if (target_speed != last_sent_speed) {
-            test_posli_prikaz(CMD_TOC_KONTINUALNE, target_speed);
-            last_sent_speed = target_speed;
-        }
-
-        // Pokud jsme v toleranci, ihned pošleme STOP
-        if (fabs(rozdil) <= T_TOLERANCE_DEG) {
-            test_posli_prikaz(CMD_STOP);
-            Serial.printf("[TEST] Dosažen cíl! Aktualni uhel: %.1f°. HOTOVO.\n", heading_deg);
-            t_stav = TEST_HOTOVO;
-            last_sent_speed = 0;
-        }
-    }
-}
-
-// =============================================================================
-//  HLAVNÍ TESTOVACÍ FUNKCE (Init a Update)
-// =============================================================================
-
-// =============================================================================
-//  SEKVENČNÍ TESTY (Blokující, ale s updatem LiDARu)
-// =============================================================================
-
-// Pomocná funkce, která čeká, dokud se aktuální pohyb nedokončí
-void pockej_na_dokonceni() {
-    while (t_stav != TEST_HOTOVO) {
-        // Musíme udržovat LiDAR a kontrolu zarovnávání v chodu!
-        loop_lidar_nv(); 
-        kontroluj_zarovnavani();
-        delay(1); 
-    }
-}
-
-// Pomocná funkce pro čekání (delay), která neblokuje LiDAR
+// Pomocná funkce pro blokující čekání (udržuje aktuální LiDAR data)
 void pockej_ms(unsigned long ms) {
     unsigned long start = millis();
     while (millis() - start < ms) {
         loop_lidar_nv();
-        delay(1);
+        delay(5);
     }
 }
 
-// Hlavní testovací sekvence: otoč se, počkej, otoč se zpět
-void test_pohybu_sekvence() {
-    Serial.println("[TEST] Cekam 5 sekund na boot RBCX a LiDAR...");
-    pockej_ms(5000);
+// =============================================================================
+//  HLAVNÍ BLOKUJÍCÍ FUNKCE PRO ROTACI
+// =============================================================================
 
-    Serial.println("[TEST] Spoustim sekvenci: 90° vlevo...");
-    otoc_o_90(true);
-    pockej_na_dokonceni();
+// Jedna "hezká" blokující funkce, která obslouží celou rotaci
+void otoc_se(bool vlevo, bool jen_zarovnat = false) {
+    // 1. Zjištění aktuálního úhlu a výpočet cíle
+    float heading_deg = nv_g_h * 180.0f / PI;
+    float base = najdi_nejblizsi_rovnobezku(heading_deg);
+    float target_deg = base;
+    if (!jen_zarovnat) {
+        target_deg += vlevo ? -90.0f : 90.0f;
+    }
     
-    Serial.println("[TEST] HOTOVO. Cekam 5 sekund...");
-    pockej_ms(5000);
-    
-    Serial.println("[TEST] Spoustim sekvenci: 90° vpravo...");
-    otoc_o_90(false);
-    pockej_na_dokonceni();
-    
-    Serial.println("[TEST] Cela sekvence dokoncena.");
+    // Normalizace
+    while (target_deg < 0) target_deg += 360.0f;
+    while (target_deg >= 360.0f) target_deg -= 360.0f;
+
+    Serial.printf("\n[TEST] ---> Start otoceni. Aktualni: %.1f°, Cil: %.1f°\n", heading_deg, target_deg);
+
+    // Prvotní odeslání rychlosti nastaveno na 0, aby první smyčka hned odeslala správnou počáteční rychlost
+    int16_t aktualni_rychlost = 0; 
+
+    // 2. Blokující smyčka - běží, dokud se nedosáhne cíle
+    while (true) {
+        // Udržujeme LiDAR neustále aktualizovaný
+        loop_lidar_nv();
+        
+        heading_deg = nv_g_h * 180.0f / PI;
+        float rozdil = vypocti_rozdil_uhlu(target_deg, heading_deg);
+        
+        // Cíl dosažen?
+        if (fabs(rozdil) <= T_TOLERANCE_DEG) {
+            test_posli_prikaz(CMD_STOP);
+            Serial.printf("[TEST] <--- Dosažen cíl! Aktualni uhel: %.1f°. HOTOVO.\n\n", heading_deg);
+            break; // Vyskočíme ze smyčky a program může pokračovat
+        }
+
+        // Zpomalování
+        int16_t pozadovana_rychlost = (rozdil > 0) ? T_CRUISE_SPEED : -T_CRUISE_SPEED;
+        if (fabs(rozdil) <= T_SLOWDOWN_DEG) {
+            pozadovana_rychlost = (rozdil > 0) ? T_SLOW_SPEED : -T_SLOW_SPEED;
+        }
+
+        // Posíláme příkaz přes UART jen při změně rychlosti
+        if (pozadovana_rychlost != aktualni_rychlost) {
+            test_posli_prikaz(CMD_TOC_KONTINUALNE, pozadovana_rychlost);
+            aktualni_rychlost = pozadovana_rychlost;
+        }
+
+        delay(5);
+    }
 }
+
+// =============================================================================
+//  INICIALIZACE A SEKVENCE (voláno z main.cpp)
+// =============================================================================
 
 void test_pohybu_init() {
     test_uart_init();
     Serial.println("[TEST] Pripraven.");
-    t_stav = TEST_IDLE; 
 }
 
+void test_pohybu_sekvence() {
+    Serial.println("[TEST] Cekam 5 sekund na boot a nacteni LiDARu...");
+    pockej_ms(5000); 
 
+    Serial.println("[TEST] Krok 1: Pouhe zarovnani podle zdi...");
+    otoc_se(false, true);
+
+    Serial.println("[TEST] Cekam 3 sekundy...");
+    pockej_ms(3000);
+
+    Serial.println("[TEST] Krok 2: Otoceni o 90° vlevo...");
+    otoc_se(true, false);
+
+    Serial.println("[TEST] Cekam 3 sekundy...");
+    pockej_ms(3000);
+
+    Serial.println("[TEST] Krok 3: Otoceni zpet (90° vpravo)...");
+    otoc_se(false, false);
+
+    Serial.println("[TEST] === VSECHNY TESTY DOKONCENY ===");
+}
