@@ -109,27 +109,7 @@ void zarovnej_podle_steny() {
     otoc_o_90(false, true); // Použijeme pomocnou pro zarovnání (relativní 0)
 }
 
-
-
-// =============================================================================
-//  HLAVNÍ TESTOVACÍ FUNKCE (Init a Update)
-// =============================================================================
-
-void test_pohybu_init() {
-    test_uart_init();
-    Serial.println("[TEST] Pripraven. Cekam na spusteni (za 5 vterin)...");
-    t_stav = TEST_CEKAM_NA_TLA;
-}
-
 void kontroluj_zarovnavani() {
-    // Odpočet 5 sekund po startu a pak začne test
-    static unsigned long start_cas = millis();
-    if (t_stav == TEST_CEKAM_NA_TLA) {
-        if (millis() - start_cas > 5000) { 
-            otoc_o_90(false); // Otočit 90 stupňů doleva (relativně k nejbližší zdi)
-        }
-    }
-
     if (t_stav == TEST_TOCIM_SE) {
         float heading_deg = nv_g_h * 180.0f / PI;
         float rozdil = vypocti_rozdil_uhlu(cilovy_uhel, heading_deg);
@@ -155,3 +135,57 @@ void kontroluj_zarovnavani() {
         }
     }
 }
+
+// =============================================================================
+//  HLAVNÍ TESTOVACÍ FUNKCE (Init a Update)
+// =============================================================================
+
+// =============================================================================
+//  SEKVENČNÍ TESTY (Blokující, ale s updatem LiDARu)
+// =============================================================================
+
+// Pomocná funkce, která čeká, dokud se aktuální pohyb nedokončí
+void pockej_na_dokonceni() {
+    while (t_stav != TEST_HOTOVO) {
+        // Musíme udržovat LiDAR a kontrolu zarovnávání v chodu!
+        loop_lidar_nv(); 
+        kontroluj_zarovnavani();
+        delay(1); 
+    }
+}
+
+// Pomocná funkce pro čekání (delay), která neblokuje LiDAR
+void pockej_ms(unsigned long ms) {
+    unsigned long start = millis();
+    while (millis() - start < ms) {
+        loop_lidar_nv();
+        delay(1);
+    }
+}
+
+// Hlavní testovací sekvence: otoč se, počkej, otoč se zpět
+void test_pohybu_sekvence() {
+    Serial.println("[TEST] Cekam 5 sekund na boot RBCX a LiDAR...");
+    pockej_ms(5000);
+
+    Serial.println("[TEST] Spoustim sekvenci: 90° vlevo...");
+    otoc_o_90(true);
+    pockej_na_dokonceni();
+    
+    Serial.println("[TEST] HOTOVO. Cekam 5 sekund...");
+    pockej_ms(5000);
+    
+    Serial.println("[TEST] Spoustim sekvenci: 90° vpravo...");
+    otoc_o_90(false);
+    pockej_na_dokonceni();
+    
+    Serial.println("[TEST] Cela sekvence dokoncena.");
+}
+
+void test_pohybu_init() {
+    test_uart_init();
+    Serial.println("[TEST] Pripraven.");
+    t_stav = TEST_IDLE; 
+}
+
+

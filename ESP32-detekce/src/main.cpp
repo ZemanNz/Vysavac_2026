@@ -55,6 +55,11 @@ void loop() {
     #endif
 
     #if USE_TEST && !USE_VIZ
+        static bool test_hotov = false;
+        if (!test_hotov) {
+            test_pohybu_sekvence();
+            test_hotov = true;
+        }
         kontroluj_zarovnavani();
     #endif
 }
