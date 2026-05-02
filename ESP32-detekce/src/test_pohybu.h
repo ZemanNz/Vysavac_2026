@@ -101,7 +101,7 @@ void otoc_o_90(bool vlevo, bool jen_zarovnat = false) {
     float heading_deg = nv_g_h * 180.0f / PI;
     float base = najdi_nejblizsi_rovnobezku(heading_deg);
     float target = base;
-    if (!jen_zarovnat) target += vlevo ? 90.0f : -90.0f;
+    if (!jen_zarovnat) target += vlevo ? -90.0f : 90.0f;
     test_start_otoceni(target);
 }
 // Vyrovná se podle nejbližší rovnoběžné stěny (0, 90, 180, 270)
@@ -126,7 +126,7 @@ void kontroluj_zarovnavani() {
     static unsigned long start_cas = millis();
     if (t_stav == TEST_CEKAM_NA_TLA) {
         if (millis() - start_cas > 5000) { 
-            otoc_o_90(true); // Otočit 90 stupňů doleva (relativně k nejbližší zdi)
+            otoc_o_90(false); // Otočit 90 stupňů doleva (relativně k nejbližší zdi)
         }
     }
 
