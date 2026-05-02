@@ -144,7 +144,7 @@ void processPacket() {
 }
 
 void init_lidar() {
-    Serial.begin(921600);
+    Serial.begin(115200);      // Vráceno na 115200 pro kompatibilitu se Serial Monitorem
     randomSeed(analogRead(34));
     Serial2.setRxBufferSize(1024);
     Serial2.begin(230400, SERIAL_8N1, LIDAR_RX, LIDAR_TX);

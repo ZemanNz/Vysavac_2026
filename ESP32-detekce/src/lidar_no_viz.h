@@ -119,7 +119,7 @@ static void nv_processPacket() {
 
 // ---------- Init ----------
 void init_lidar_nv() {
-    Serial.begin(115200);      // Pomalejší baud pro čitelný Serial Monitor
+    Serial.begin(115200);      // Vráceno na 115200 pro kompatibilitu se Serial Monitorem
     randomSeed(analogRead(34));
     Serial2.setRxBufferSize(1024);
     Serial2.begin(230400, SERIAL_8N1, NV_LIDAR_RX, NV_LIDAR_TX);

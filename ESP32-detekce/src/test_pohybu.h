@@ -68,6 +68,43 @@ float najdi_nejblizsi_rovnobezku(float aktualni_heading_deg) {
     return 270.0f;
 }
 
+void test_start_otoceni(float target_deg) {
+    float heading_deg = nv_g_h * 180.0f / PI;
+    cilovy_uhel = target_deg;
+    
+    // Normalizace cíle
+    while (cilovy_uhel < 0) cilovy_uhel += 360.0f;
+    while (cilovy_uhel >= 360.0f) cilovy_uhel -= 360.0f;
+
+    Serial.printf("[TEST] Start otoceni. Aktualni: %.1f°, Cil: %.1f°\n", heading_deg, cilovy_uhel);
+    
+    float rozdil = cilovy_uhel - heading_deg;
+    while (rozdil > 180.0f) rozdil -= 360.0f;
+    while (rozdil < -180.0f) rozdil += 360.0f;
+    
+    if (rozdil > 0) {
+        test_posli_prikaz(CMD_TOC_KONTINUALNE, 10); 
+    } else {
+        test_posli_prikaz(CMD_TOC_KONTINUALNE, -10);
+    }
+    
+    t_stav = TEST_TOCIM_SE;
+}
+
+// Nová funkce: otočí se o 90 stupňů vzhledem k nejbližší "čisté" rovnoběžce
+void test_otoc_o_90(bool vlevo) {
+    float heading_deg = nv_g_h * 180.0f / PI;
+    float aktualni_rovnobezka = najdi_nejblizsi_rovnobezku(heading_deg);
+    
+    float target;
+    if (vlevo) {
+        target = aktualni_rovnobezka + 90.0f;
+    } else {
+        target = aktualni_rovnobezka - 90.0f;
+    }
+    test_start_otoceni(target);
+}
+
 void test_pohybu_init() {
     test_uart_init();
     Serial.println("[TEST] Pripraven. Cekam na spusteni (napr. za 5 vterin)...");
@@ -75,31 +112,16 @@ void test_pohybu_init() {
 }
 
 void test_pohybu_start() {
-    // Spočítáme aktuální úhel ve stupních (nv_g_h pochází z lidar_no_viz.h)
     float heading_deg = nv_g_h * 180.0f / PI;
-    cilovy_uhel = najdi_nejblizsi_rovnobezku(heading_deg);
-    
-    Serial.printf("[TEST] Start zarovnani. Aktualni: %.1f°, Cil: %.1f°\n", heading_deg, cilovy_uhel);
-    
-    // Zjistíme, jestli to máme blíž doleva nebo doprava
-    float rozdil = cilovy_uhel - heading_deg;
-    while (rozdil > 180.0f) rozdil -= 360.0f;
-    while (rozdil < -180.0f) rozdil += 360.0f;
-    
-    if (rozdil > 0) {
-        test_posli_prikaz(CMD_TOC_KONTINUALNE, 1); // 1 = rotace doprava
-    } else {
-        test_posli_prikaz(CMD_TOC_KONTINUALNE, -1); // -1 = rotace doleva
-    }
-    
-    t_stav = TEST_TOCIM_SE;
+    float target = najdi_nejblizsi_rovnobezku(heading_deg);
+    test_start_otoceni(target);
 }
 
 void test_pohybu_update() {
-    // Odpočet 5 sekund po startu a pak začne test
+    // Odpočet 5 sekund po startu a pak začne test (zarovnání na nejbližší zeď)
     static unsigned long start_cas = millis();
     if (t_stav == TEST_CEKAM_NA_TLA) {
-        if (millis() - start_cas > 5000) { // Spustí se samo za 5 vteřin
+        if (millis() - start_cas > 5000) { 
             test_pohybu_start();
         }
     }
@@ -111,12 +133,28 @@ void test_pohybu_update() {
         while (rozdil > 180.0f) rozdil -= 360.0f;
         while (rozdil < -180.0f) rozdil += 360.0f;
         
-        // Zde budeme u UART používat rychleji = ověřujeme v každém loopu
-        // Pokud jsme v toleranci např. 2 stupně, ihned pošleme STOP
-        if (fabs(rozdil) <= 2.0f) {
+        // --- LOGIKA ZPOMALOVÁNÍ ---
+        static int16_t last_sent_speed = 0;
+        
+        // Reset last_sent_speed pokud jsme právě začali (t_stav se změnil nebo jsme v prvním loopu rotace)
+        // (Zde to řešíme tak, že pokud se t_stav změnil na TEST_TOCIM_SE, last_sent_speed by mělo být 0)
+        
+        int16_t target_speed = (rozdil > 0) ? 10 : -10;
+        if (fabs(rozdil) <= 9.0f) {
+            target_speed = (rozdil > 0) ? 3 : -3;
+        }
+
+        if (target_speed != last_sent_speed) {
+            test_posli_prikaz(CMD_TOC_KONTINUALNE, target_speed);
+            last_sent_speed = target_speed;
+        }
+
+        // Pokud jsme v toleranci např. 2.5 stupně, ihned pošleme STOP
+        if (fabs(rozdil) <= 2.5f) {
             test_posli_prikaz(CMD_STOP);
-            Serial.printf("[TEST] Dosažen cíl! Aktualni uhlel: %.1f°. HOTOVO.\n", heading_deg);
+            Serial.printf("[TEST] Dosažen cíl! Aktualni uhel: %.1f°. HOTOVO.\n", heading_deg);
             t_stav = TEST_HOTOVO;
+            last_sent_speed = 0;
         }
     }
 }

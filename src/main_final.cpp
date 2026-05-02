@@ -161,7 +161,7 @@ void uart_vlakno(void *pvParameters) {
                 pocet_nasich_puku);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(5)); // Sníženo z 20ms pro rychlejší reakci na STOP/změnu rychlosti
     }
 }
 
@@ -303,15 +303,12 @@ void setup() {
                 case CMD_TOC_KONTINUALNE:
                     aktualni_stav = STAT_BUSY;
                     posli_stav();
-                    if (param > 0) {
-                        Serial.println(">> Tocim se nekonecne VPRAVO...");
-                        rkMotorsSetPower(20, -20); // VPRAVO
+                    if (param != 0) {
+                        Serial.printf(">> Tocim se nekonecne (rychlost: %d)...\n", param);
+                        rkMotorsSetSpeed(param, -param); // param > 0 is right, param < 0 is left
                     } else {
-                        Serial.println(">> Tocim se nekonecne VLEVO...");
-                        rkMotorsSetPower(-20, 20); // VLEVO
+                        rkMotorsSetSpeed(0, 0);
                     }
-                    // Nenastavujeme na STAT_DONE ani STAT_READY, motory stále jedou!
-                    // Konec zajistí CMD_STOP
                     break;
             }
 
@@ -340,7 +337,7 @@ void setup() {
             aktualni_stav = STAT_READY;
         }
 
-        delay(50);
+        delay(20);
     }
 }
 
