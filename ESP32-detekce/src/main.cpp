@@ -55,6 +55,6 @@ void loop() {
     #endif
 
     #if USE_TEST && !USE_VIZ
-        test_pohybu_update();
+        kontroluj_zarovnavani();
     #endif
 }

@@ -43,7 +43,7 @@ void test_posli_prikaz(uint8_t cmd, int16_t param = 0) {
 }
 
 // =============================================================================
-//  TESTOVACÍ LOGIKA
+//  STAVOVÉ PROMĚNNÉ A KONFIGURACE
 // =============================================================================
 
 enum TestStav {
@@ -56,92 +56,89 @@ enum TestStav {
 static TestStav t_stav = TEST_CEKAM_NA_TLA;
 static float cilovy_uhel = 0.0f;
 
+static float T_TOLERANCE_DEG  = 2.5f;
+static float T_SLOWDOWN_DEG   = 12.0f;
+static int16_t T_CRUISE_SPEED = 10;
+static int16_t T_SLOW_SPEED   = 3;
+
+// =============================================================================
+//  POMOCNÉ FUNKCE
+// =============================================================================
+
+// Pomocná funkce pro výpočet nejkratšího rozdílu mezi úhly (-180 až 180)
+float vypocti_rozdil_uhlu(float cil, float aktualni) {
+    float r = cil - aktualni;
+    while (r > 180.0f) r -= 360.0f;
+    while (r < -180.0f) r += 360.0f;
+    return r;
+}
+
 // Funkce, která najde nejbližší "rovnoběžný" úhel vzhledem ke zdem (0, 90, 180, 270)
 float najdi_nejblizsi_rovnobezku(float aktualni_heading_deg) {
-    // Normalizace do 0-360
-    while (aktualni_heading_deg < 0) aktualni_heading_deg += 360.0f;
-    while (aktualni_heading_deg >= 360.0f) aktualni_heading_deg -= 360.0f;
+    float a = aktualni_heading_deg;
+    while (a < 0) a += 360.0f;
+    while (a >= 360.0f) a -= 360.0f;
 
-    if (aktualni_heading_deg >= 315 || aktualni_heading_deg < 45) return 0.0f;
-    if (aktualni_heading_deg >= 45 && aktualni_heading_deg < 135) return 90.0f;
-    if (aktualni_heading_deg >= 135 && aktualni_heading_deg < 225) return 180.0f;
+    if (a >= 315 || a < 45) return 0.0f;
+    if (a >= 45 && a < 135) return 90.0f;
+    if (a >= 135 && a < 225) return 180.0f;
     return 270.0f;
 }
 
 void test_start_otoceni(float target_deg) {
     float heading_deg = nv_g_h * 180.0f / PI;
     cilovy_uhel = target_deg;
-    
-    // Normalizace cíle
     while (cilovy_uhel < 0) cilovy_uhel += 360.0f;
     while (cilovy_uhel >= 360.0f) cilovy_uhel -= 360.0f;
 
     Serial.printf("[TEST] Start otoceni. Aktualni: %.1f°, Cil: %.1f°\n", heading_deg, cilovy_uhel);
-    
-    float rozdil = cilovy_uhel - heading_deg;
-    while (rozdil > 180.0f) rozdil -= 360.0f;
-    while (rozdil < -180.0f) rozdil += 360.0f;
-    
-    if (rozdil > 0) {
-        test_posli_prikaz(CMD_TOC_KONTINUALNE, 10); 
-    } else {
-        test_posli_prikaz(CMD_TOC_KONTINUALNE, -10);
-    }
-    
+    float rozdil = vypocti_rozdil_uhlu(cilovy_uhel, heading_deg);
+    test_posli_prikaz(CMD_TOC_KONTINUALNE, (rozdil > 0) ? T_CRUISE_SPEED : -T_CRUISE_SPEED);
     t_stav = TEST_TOCIM_SE;
 }
-
-// Nová funkce: otočí se o 90 stupňů vzhledem k nejbližší "čisté" rovnoběžce
-void test_otoc_o_90(bool vlevo) {
+// Otočí se o 90 stupňů (nebo 0 pro zarovnání) vzhledem k nejbližší "čisté" rovnoběžce
+void otoc_o_90(bool vlevo, bool jen_zarovnat = false) {
     float heading_deg = nv_g_h * 180.0f / PI;
-    float aktualni_rovnobezka = najdi_nejblizsi_rovnobezku(heading_deg);
-    
-    float target;
-    if (vlevo) {
-        target = aktualni_rovnobezka + 90.0f;
-    } else {
-        target = aktualni_rovnobezka - 90.0f;
-    }
+    float base = najdi_nejblizsi_rovnobezku(heading_deg);
+    float target = base;
+    if (!jen_zarovnat) target += vlevo ? 90.0f : -90.0f;
     test_start_otoceni(target);
 }
+// Vyrovná se podle nejbližší rovnoběžné stěny (0, 90, 180, 270)
+void zarovnej_podle_steny() {
+    otoc_o_90(false, true); // Použijeme pomocnou pro zarovnání (relativní 0)
+}
+
+
+
+// =============================================================================
+//  HLAVNÍ TESTOVACÍ FUNKCE (Init a Update)
+// =============================================================================
 
 void test_pohybu_init() {
     test_uart_init();
-    Serial.println("[TEST] Pripraven. Cekam na spusteni (napr. za 5 vterin)...");
+    Serial.println("[TEST] Pripraven. Cekam na spusteni (za 5 vterin)...");
     t_stav = TEST_CEKAM_NA_TLA;
 }
 
-void test_pohybu_start() {
-    float heading_deg = nv_g_h * 180.0f / PI;
-    float target = najdi_nejblizsi_rovnobezku(heading_deg);
-    test_start_otoceni(target);
-}
-
-void test_pohybu_update() {
-    // Odpočet 5 sekund po startu a pak začne test (zarovnání na nejbližší zeď)
+void kontroluj_zarovnavani() {
+    // Odpočet 5 sekund po startu a pak začne test
     static unsigned long start_cas = millis();
     if (t_stav == TEST_CEKAM_NA_TLA) {
         if (millis() - start_cas > 5000) { 
-            test_pohybu_start();
+            otoc_o_90(true); // Otočit 90 stupňů doleva (relativně k nejbližší zdi)
         }
     }
 
     if (t_stav == TEST_TOCIM_SE) {
         float heading_deg = nv_g_h * 180.0f / PI;
+        float rozdil = vypocti_rozdil_uhlu(cilovy_uhel, heading_deg);
         
-        float rozdil = cilovy_uhel - heading_deg;
-        while (rozdil > 180.0f) rozdil -= 360.0f;
-        while (rozdil < -180.0f) rozdil += 360.0f;
-        
-        // --- LOGIKA ZPOMALOVÁNÍ ---
         static int16_t last_sent_speed = 0;
         
-        // Reset last_sent_speed pokud jsme právě začali (t_stav se změnil nebo jsme v prvním loopu rotace)
-        // (Zde to řešíme tak, že pokud se t_stav změnil na TEST_TOCIM_SE, last_sent_speed by mělo být 0)
-        
-        int16_t target_speed = (rozdil > 0) ? 10 : -10;
-        if (fabs(rozdil) <= 9.0f) {
-            target_speed = (rozdil > 0) ? 3 : -3;
+        int16_t target_speed = (rozdil > 0) ? T_CRUISE_SPEED : -T_CRUISE_SPEED;
+        if (fabs(rozdil) <= T_SLOWDOWN_DEG) {
+            target_speed = (rozdil > 0) ? T_SLOW_SPEED : -T_SLOW_SPEED;
         }
 
         if (target_speed != last_sent_speed) {
@@ -149,8 +146,8 @@ void test_pohybu_update() {
             last_sent_speed = target_speed;
         }
 
-        // Pokud jsme v toleranci např. 2.5 stupně, ihned pošleme STOP
-        if (fabs(rozdil) <= 2.5f) {
+        // Pokud jsme v toleranci, ihned pošleme STOP
+        if (fabs(rozdil) <= T_TOLERANCE_DEG) {
             test_posli_prikaz(CMD_STOP);
             Serial.printf("[TEST] Dosažen cíl! Aktualni uhel: %.1f°. HOTOVO.\n", heading_deg);
             t_stav = TEST_HOTOVO;
