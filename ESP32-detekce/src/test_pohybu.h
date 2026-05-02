@@ -148,6 +148,7 @@ void test_pohybu_sekvence() {
     Serial.println("[TEST] Cekam 5 sekund na boot a nacteni LiDARu...");
     pockej_ms(5000); 
 
+    
     Serial.println("[TEST] Krok 1: Pouhe zarovnani podle zdi...");
     otoc_se(false, true);
 
