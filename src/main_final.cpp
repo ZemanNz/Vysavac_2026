@@ -48,6 +48,7 @@ enum CmdID : uint8_t {
     CMD_COUVEJ          = 0x05,  // Couvej (param = vzdálenost mm)
     CMD_VYLOZ           = 0x06,  // Otevření zásobníků (jen otevři!)
     CMD_ZAVRI_ZASOBNIKY = 0x07,  // Zavření zásobníků + reset počtu puků
+    CMD_TOC_KONTINUALNE = 0x08,  // Zapne rotaci na místě a neukončí ji (čeká na CMD_STOP z ESP32)
 };
 
 // Statusy (RBCX → ESP32) — MUSÍ odpovídat StatID v mozek.h!
@@ -68,6 +69,7 @@ const char* cmd_name(uint8_t cmd) {
         case CMD_COUVEJ:          return "COUVEJ";
         case CMD_VYLOZ:           return "VYLOZ";
         case CMD_ZAVRI_ZASOBNIKY: return "ZAVRI_ZASOBNIKY";
+        case CMD_TOC_KONTINUALNE: return "TOC_KONTINUALNE";
         default:                  return "???";
     }
 }
@@ -292,6 +294,24 @@ void setup() {
                     aktualni_stav = STAT_DONE;
                     posli_stav();
                     aktualni_stav = STAT_READY;
+                    break;
+
+                // ─────────────────────────────────────────────────
+                //  TOC_KONTINUALNE — roztočí motory a nechá je běžet.
+                //  Zastavení proběhne až přijde CMD_STOP.
+                // ─────────────────────────────────────────────────
+                case CMD_TOC_KONTINUALNE:
+                    aktualni_stav = STAT_BUSY;
+                    posli_stav();
+                    if (param > 0) {
+                        Serial.println(">> Tocim se nekonecne VPRAVO...");
+                        rkMotorsSetPower(20, -20); // VPRAVO
+                    } else {
+                        Serial.println(">> Tocim se nekonecne VLEVO...");
+                        rkMotorsSetPower(-20, 20); // VLEVO
+                    }
+                    // Nenastavujeme na STAT_DONE ani STAT_READY, motory stále jedou!
+                    // Konec zajistí CMD_STOP
                     break;
             }
 
