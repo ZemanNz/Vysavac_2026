@@ -306,18 +306,16 @@ void setup() {
                 //  Zastavení proběhne až přijde CMD_STOP.
                 // ─────────────────────────────────────────────────
                 case CMD_TOC_KONTINUALNE:
-                    aktualni_stav = STAT_BUSY;
+                    aktualni_stav = STAT_READY;
                     posli_stav();
                     if (param != 0) {
                         Serial.printf(">> Tocim se nekonecne (rychlost: %d)...\n", param);
-                        rkMotorsSetSpeed(param, -param); // param > 0 is right, param < 0 is left
+                        rkMotorsSetSpeed(param, -param); 
                     } else {
                         rkMotorsSetSpeed(0, 0);
                     }
                     break;
             }
-
-            aktivni_prikaz = CMD_NOP;
         }
 
         // === MANUÁLNÍ OVLÁDÁNÍ (testování bez ESP32) ===

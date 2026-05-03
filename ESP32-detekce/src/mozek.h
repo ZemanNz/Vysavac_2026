@@ -692,7 +692,7 @@ void mozek_rozhoduj() {
     unsigned long zbyva_ms = (ubehnuto < DELKA_ZAPASU_MS) ? (DELKA_ZAPASU_MS - ubehnuto) : 0;
 
     // Posílání korekcí během jízdy
-    if (posledni_odeslany_prikaz == CMD_JED_SBIREJ && rbcx.stav != STAT_DONE && cas_startu > 0) {
+    if (posledni_odeslany_prikaz == CMD_JED_SBIREJ && rbcx.stav == STAT_BUSY && cas_startu > 0) {
         if (millis() - mozek_posledni_lidar_error_ms > 30) {
             float rozdil = vypocti_rozdil_uhlu(mozek_cilovy_uhel_jizdy, senzory.heading);
             int16_t param_err = (int16_t)roundf(rozdil * 10.0f);
