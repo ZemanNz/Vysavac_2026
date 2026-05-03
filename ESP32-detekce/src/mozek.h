@@ -28,9 +28,9 @@
 // Rozměry robota (pro lajnovou navigaci)
 #define SIRKA_ROBOTA_MM       300.0f   // šířka robota = šířka jedné lajny
 #define DELKA_ROBOTA_MM       360.0f   // délka robota
-#define BEZPECNA_VZDALENOST_ZDI    (SIRKA_ROBOTA_MM / 2.0f + 350.0f)  // Zvětšeno o 15cm
-#define BEZPECNA_VZDALENOST_ZDIE_Y (DELKA_ROBOTA_MM / 2.0f + 350.0f)  // Horní stěna (nájezd)
-#define BEZPECNA_VZDALENOST_DOMOV_Y (DELKA_ROBOTA_MM / 2.0f + 300.0f) // Spodní stěna (domov)
+#define BEZPECNA_VZDALENOST_ZDI    (NV_LIDAR_FROM_FRONT + 200.0f)  // Zvětšeno o 15cm
+#define BEZPECNA_VZDALENOST_ZDIE_Y (NV_LIDAR_FROM_FRONT + 350.0f)  // Horní stěna (nájezd)
+#define BEZPECNA_VZDALENOST_DOMOV_Y (NV_LIDAR_FROM_FRONT +  200.0f) // Spodní stěna (domov)
 #define HOME_ZONA_MM          700.0f
 #define MOZEK_HOME_X  (NV_ARENA_SIZE - HOME_ZONA_MM / 2.0f)
 #define MOZEK_HOME_Y  (HOME_ZONA_MM / 2.0f)
@@ -786,7 +786,7 @@ void mozek_rozhoduj() {
                 // Pojistka z lidaru: jaká je fyzická vzdálenost nárazníku od zdi?
                 float limit_dist_bumper_y = BEZPECNA_VZDALENOST_ZDIE_Y; 
                 
-                bool dojeli_pozice = (senzory.pozice_y >= navigace.lajna_y[0] - SIRKA_ROBOTA_MM / 2.0f);
+                bool dojeli_pozice = (senzory.pozice_y >= NV_ARENA_SIZE - limit_dist_bumper_y);
                 bool dojeli_lidar  = (senzory.dist_vpredu <= limit_dist_bumper_y);
 
                 if (dojeli_pozice || dojeli_lidar) {
@@ -807,7 +807,7 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     delay(1000);
                     nastav_cil_lajny();
-                    mozek_start_jizdy(60);
+                    mozek_start_jizdy(15);
                     Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
@@ -851,7 +851,7 @@ void mozek_rozhoduj() {
         // [D] Blízko protější zdi
         {
             bool limit_x = dosahli_konce_lajny();
-            float limit_dist_bumper_x = BEZPECNA_VZDALENOST_ZDI - (DELKA_ROBOTA_MM / 2.0f);
+            float limit_dist_bumper_x = BEZPECNA_VZDALENOST_ZDI;
             bool limit_lidar = (senzory.dist_vpredu <= limit_dist_bumper_x);
 
             if (limit_x || limit_lidar) {
@@ -1482,7 +1482,7 @@ void mozek_start_zapasu() {
         dynamicky_rezim = false;
         uz_vylozil = false;
         Serial.println("[MOZEK] ═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══");
-        mozek_start_jizdy(60);
+        mozek_start_jizdy(15);
         zmen_stav(STAV_NAJEZD_NAHORU);
     } else {
         // ═══ DRUHÝ A DALŠÍ START (dynamický režim) ═══
