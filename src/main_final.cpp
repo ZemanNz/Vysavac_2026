@@ -16,6 +16,10 @@
 //
 // =============================================================================
 
+
+
+rkConfig cfg;
+
 char nase_barva = 'R';
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
@@ -27,6 +31,7 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS3472
 typedef struct __attribute__((packed)) {
     uint8_t cmd;
     int16_t param;
+    int16_t param2; // Přidáno pro cílovou vzdálenost
 } EspCommand;
 
 // --- RBCX → ESP32 (7 bajtů) ---
@@ -90,6 +95,7 @@ const char* stav_name(uint8_t s) {
 
 volatile uint8_t aktivni_prikaz = CMD_NOP;
 volatile int16_t aktivni_param  = 0;
+volatile int16_t aktivni_param2 = 0;
 volatile bool    novy_prikaz    = false;
 volatile uint8_t aktualni_stav  = STAT_READY;  // Co právě děláme
 
@@ -146,6 +152,7 @@ void uart_vlakno(void *pvParameters) {
                 zastav_jizdu = true;
                 aktivni_prikaz = cmd.cmd;
                 aktivni_param  = cmd.param;
+                aktivni_param2 = cmd.param2;
                 novy_prikaz    = true;
             }
         }
@@ -174,9 +181,8 @@ void uart_vlakno(void *pvParameters) {
 //  SETUP + HLAVNÍ SMYČKA
 // =============================================================================
 
-void setup() {
+void setup(){
     Serial.begin(115200);
-    rkConfig cfg;
     rkSetup(cfg);
     delay(50);
 
@@ -205,8 +211,9 @@ void setup() {
             novy_prikaz = false;
             uint8_t cmd = aktivni_prikaz;
             int16_t param = aktivni_param;
+            int16_t param2 = aktivni_param2;
 
-            Serial.printf("\n========== PRIKAZ: %s  param=%d ==========\n", cmd_name(cmd), param);
+            Serial.printf("\n========== PRIKAZ: %s  param=%d  param2=%d ==========\n", cmd_name(cmd), param, param2);
 
             switch (cmd) {
 
@@ -224,9 +231,9 @@ void setup() {
                     zastav_jizdu = false;
                     aktualni_stav = STAT_BUSY;
                     posli_stav();
-                    Serial.printf(">> Jedu dopredu na %d%% a sbiram puky...\n", param);
+                    Serial.printf(">> Jedu dopredu na %d%% a sbiram puky (cil: %d mm)...\n", param, param2);
                     
-                    jed_a_sbirej((float)param);
+                    jed_a_sbirej((float)param, param2);
                     
                     rkLedYellow(false);
                     Serial.printf(">> Zastaveno. Nasbirano %d nasich puku.\n", pocet_nasich_puku);

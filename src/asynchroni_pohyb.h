@@ -20,16 +20,28 @@ volatile bool zastav_jizdu = false;
 volatile int pocet_nasich_puku = 0;
 volatile float g_lidar_error = 0.0f;
 
+extern rkConfig cfg; 
+
+const float m_wheel_circumference = cfg.motor_wheel_diameter * M_PI; 
+
+
 // Převod procent na ticky/s
 static inline int16_t pct_to_speed(float pct) {
     return (int16_t)(pct * MAX_TICKS_PER_SEC / 100.0f);
+}
+
+float ticksToMm(int32_t ticks) {
+    // Použijeme průměr kola přímo z konfigurace (default 61mm)
+    float circumference = cfg.motor_wheel_diameter * M_PI;
+    if (cfg.prevod_motoru < 1.0f) return 0; // Ochrana proti dělení nulou
+    return (float(ticks) / cfg.prevod_motoru) * circumference;
 }
 
 /**
  * @brief Jede dopředu, třídí puky a zastaví se na příkaz nebo náraz.
  * @param speed  Cílová rychlost v % (0–100)
  */
-void jed_a_sbirej(float speed) {
+void jed_a_sbirej(float speed, int mm = 0) {
     auto& man = rb::Manager::get();
     auto& ml = man.motor(MOTOR_LEFT);
     auto& mr = man.motor(MOTOR_RIGHT);
@@ -46,8 +58,8 @@ void jed_a_sbirej(float speed) {
     const float decel_step = 2.0f;   // plynulé ale rychlé zastavení (původně 1.5, pak 10)
 
     // === Rychlosti s polaritou ===
-    const float base_speed_left  = POLARITY_LEFT  ? -speed : speed;
-    const float base_speed_right = POLARITY_RIGHT ? -speed : speed;
+    float base_speed_left  = POLARITY_LEFT  ? -speed : speed;
+    float base_speed_right = POLARITY_RIGHT ? -speed : speed;
 
     float current_speed_left  = (base_speed_left  > 0) ? m_min_speed : -m_min_speed;
     float current_speed_right = (base_speed_right > 0) ? m_min_speed : -m_min_speed;
@@ -77,6 +89,7 @@ void jed_a_sbirej(float speed) {
 
     zastav_jizdu = false;
 
+
     Serial.println("=== JED_A_SBIREJ START ===");
 
     // === HLAVNÍ SMYČKA ===
@@ -105,6 +118,27 @@ void jed_a_sbirej(float speed) {
             phase = DECELERATE;
         }
 
+        if (mm != 0) {
+            float ujeto = max(ticksToMm(left_pos), ticksToMm(right_pos));
+            
+            Serial.printf("ujeto: %.1f mm\n", ujeto);
+            // 1) Úplný cíl
+            if (ujeto >= mm) {
+                if (phase != DECELERATE && phase != STOPPED) {
+                    Serial.printf(">> CIL DOSAZEN (%.1f mm) -> STOP\n", ujeto);
+                    phase = DECELERATE;
+                }
+            } 
+            // 2) Pomalý dojezd (8 cm před cílem zpomalíme na 15 %)
+            else if (ujeto >= (mm - 80) && speed > 15.0f) {
+                if (phase == CRUISE) {
+                    Serial.println(">> DOJEZD: Zpomaluji na 15 %");
+                    speed = 15.0f;
+                    // base_speed se přepočítá v dalším switchi (pokud ho uděláme ne-const)
+                }
+            }
+        }
+
         // --- 3) ŘÍZENÍ RYCHLOSTI ---
         switch (phase) {
             case ACCELERATE:
@@ -115,14 +149,15 @@ void jed_a_sbirej(float speed) {
                     current_speed_right += step_accel_right;
                 }
                 if (abs(current_speed_left) >= abs(speed) && abs(current_speed_right) >= abs(speed)) {
-                    current_speed_left = base_speed_left;
-                    current_speed_right = base_speed_right;
                     phase = CRUISE;
                     Serial.println(">> CRUISE");
                 }
                 break;
 
             case CRUISE:
+                // Přepočítáme základní rychlosti (pokud se změnilo 'speed')
+                base_speed_left  = POLARITY_LEFT  ? -speed : speed;
+                base_speed_right = POLARITY_RIGHT ? -speed : speed;
                 current_speed_left = base_speed_left;
                 current_speed_right = base_speed_right;
                 break;

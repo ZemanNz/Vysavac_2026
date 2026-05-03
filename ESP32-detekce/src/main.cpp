@@ -21,6 +21,7 @@
 
 #if USE_MOZEK && !USE_VIZ
     #include "mozek.h"
+    #include "test_prejezdu.h" // Přidáno pro testování přejezdu
 #endif
 
 #if USE_TEST && !USE_VIZ
@@ -36,6 +37,7 @@ void setup() {
 
     #if USE_MOZEK && !USE_VIZ
         mozek_init();
+        
     #endif
 
     #if USE_TEST && !USE_VIZ
@@ -52,7 +54,7 @@ void loop() {
     #endif
 
     #if USE_MOZEK && !USE_VIZ
-        mozek_update();
+        mozek_update(); // MOZEK VYPNUT PRO TESTOVÁNÍ PŘEJEZDU
     #endif
 
     #if USE_TEST && !USE_VIZ

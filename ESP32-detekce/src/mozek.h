@@ -51,6 +51,7 @@
 typedef struct __attribute__((packed)) {
     uint8_t cmd;
     int16_t param;
+    int16_t param2; // Přidáno pro cílovou vzdálenost (mm)
 } EspCommand;
 
 // RBCX → ESP32 (7 bajtů)
@@ -247,16 +248,17 @@ void mozek_uart_init() {
         UART_RBCX_RX, UART_RBCX_TX, UART_RBCX_BAUD);
 }
 
-void posli_prikaz(uint8_t cmd, int16_t param = 0) {
+void posli_prikaz(uint8_t cmd, int16_t param = 0, int16_t param2 = 0) {
     EspCommand c;
     c.cmd = cmd;
     c.param = param;
+    c.param2 = param2;
     Serial1.write(SYNC0);
     Serial1.write(SYNC1);
     Serial1.write((uint8_t*)&c, sizeof(c));
     cas_posledniho_prikazu = millis();
     posledni_odeslany_prikaz = cmd;
-    Serial.printf("[MOZEK] >>> CMD: 0x%02X  param=%d\n", cmd, param);
+    Serial.printf("[MOZEK] >>> CMD: 0x%02X  param=%d  param2=%d\n", cmd, param, param2);
 }
 
 // Stavový automat pro příjem (neblokující)
@@ -672,6 +674,7 @@ void posli_korekci(int16_t param) {
 
 static float mozek_cilovy_uhel_jizdy = 0.0f;
 static float mozek_startovni_y_prejezdu = 0.0f;
+static float mozek_startovni_lidar_prejezdu = 0.0f;
 static unsigned long mozek_posledni_lidar_error_ms = 0;
 
 void mozek_start_jizdy(int rychlost) {
@@ -894,55 +897,59 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     delay(1000);
                     mozek_startovni_y_prejezdu = senzory.pozice_y;
-                    mozek_start_jizdy(35); // Startujeme na 35 %
+                    mozek_startovni_lidar_prejezdu = senzory.dist_vpredu;
+                    
+                    // Přejezd 25 cm pomocí enkodérů na RBCX
+                    posli_prikaz(CMD_JED_SBIREJ, 35, 250); 
+                    
                     cas_krok_ms = millis(); 
                     krok = 3;
                 }
                 break;
             case 3: {
-                float ujeto_y = fabsf(mozek_startovni_y_prejezdu - senzory.pozice_y);
-                float cilove_y = mozek_startovni_y_prejezdu - 200.0f;
-                bool jsem_dole = (senzory.pozice_y <= BEZPECNA_VZDALENOST_DOMOV_Y);
-                
-                // [Chytré brždění] - pokud zbývá méně než 10 cm, zpomalíme na 15 %
-                static int aktualni_vnitrni_rychlost = 35;
-                if (ujeto_y >= 100.0f && aktualni_vnitrni_rychlost != 15) {
-                    aktualni_vnitrni_rychlost = 15;
-                    posli_prikaz(CMD_JED_SBIREJ, 15);
-                    Serial.println("[MOZEK] Prejezd: Zpomaluji na 15 % pro přesný dojezd.");
+                // Čekáme, až RBCX samo dojede do cíle (250mm)
+                if (rbcx_hotovo()) {
+                    float final_y = senzory.pozice_y;
+                    float final_lidar = senzory.dist_vpredu;
+                    Serial.printf("[MOZEK] Prejezd DOKONCEN (Enkodery): Lidar: %.1f, SLAM: %.1f\n", 
+                        mozek_startovni_lidar_prejezdu - final_lidar, 
+                        fabsf(mozek_startovni_y_prejezdu - final_y));
+                    krok = 4;
+                    break;
                 }
 
                 // [A] Soupeř v cestě
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
-                    aktualni_vnitrni_rychlost = 35; 
+                    Serial.println("[MOZEK] Prejezd PRERUSEN (Souper!)");
                     krok = 4;
                     break;
                 }
 
-                // [B] Náraz
+                // [B] Náraz (tlačítka)
                 if (naraz_vpredu()) {
                     posli_prikaz(CMD_STOP);
-                    aktualni_vnitrni_rychlost = 35;
+                    Serial.println("[MOZEK] Prejezd PRERUSEN (Naraz!)");
                     krok = 4;
                     break;
                 }
 
-                // [C] Cíl nebo dno
-                if (ujeto_y >= 200.0f || jsem_dole) {
+                // [C] Bezpečnostní pojistka u zdi (Lidar)
+                if (senzory.dist_vpredu <= 300.0f) {
                     posli_prikaz(CMD_STOP);
-                    aktualni_vnitrni_rychlost = 35;
-                    cas_krok_ms = 0;
+                    Serial.println("[MOZEK] Prejezd ZASTAVEN (ZED!)");
                     krok = 4;
+                    break;
                 }
                 break;
             }
             case 4:  // Druhé otočení
                 if (rbcx_hotovo()) {
                     float final_y = senzory.pozice_y;
-                    float ujeto_total = fabsf(mozek_startovni_y_prejezdu - final_y);
-                    Serial.printf("[MOZEK] Prejezd REALNE DOKONCEN: Y %.0f -> %.0f (ujeto CELKEM %.1f mm, cil bylo 200)\n", 
-                        mozek_startovni_y_prejezdu, final_y, ujeto_total);
+                    float ujeto_total_slam = fabsf(mozek_startovni_y_prejezdu - final_y);
+                    float ujeto_total_lidar = mozek_startovni_lidar_prejezdu - senzory.dist_vpredu;
+                    Serial.printf("[MOZEK] Prejezd REALNE DOKONCEN: Ujeto LIDAR %.1f mm, SLAM %.1f mm (cil 200)\n", 
+                        ujeto_total_lidar, ujeto_total_slam);
 
                     delay(1000);
                     if (navigace.smer_doprava)
