@@ -43,6 +43,10 @@
 // Limity puků
 #define PUKY_PLNY_ZASOBNIK  10   // kolik puků → jedem domů
 
+// Dvoufázový dojezd (zpomalení před zdí)
+#define ZPOMALENI_VZDALENOST_MM 200.0f
+#define RYCHLOST_DOJEZDU        25
+
 // =============================================================================
 //  KOMUNIKAČNÍ PROTOKOL (musí odpovídat RBCX main_final.cpp!)
 // =============================================================================
@@ -231,6 +235,7 @@ static unsigned long cas_krok_ms = 0;
 static unsigned long vyklad_zbyva_ms = 1500;
 static unsigned long cas_posledniho_prikazu = 0;
 static uint8_t posledni_odeslany_prikaz = 0;
+static int mozek_aktualni_rychlost = 0;
 
 
 // =============================================================================
@@ -258,6 +263,12 @@ void posli_prikaz(uint8_t cmd, int16_t param = 0, int16_t param2 = 0) {
     Serial1.write((uint8_t*)&c, sizeof(c));
     cas_posledniho_prikazu = millis();
     posledni_odeslany_prikaz = cmd;
+    
+    // Resetuj sledovanou rychlost, pokud posíláme jiný příkaz než jízdu nebo korekci
+    if (cmd != CMD_JED_SBIREJ && cmd != CMD_LIDAR_ERROR) {
+        mozek_aktualni_rychlost = 0;
+    }
+    
     Serial.printf("[MOZEK] >>> CMD: 0x%02X  param=%d  param2=%d\n", cmd, param, param2);
 }
 
@@ -681,6 +692,7 @@ void mozek_start_jizdy(int rychlost) {
     mozek_aktualizuj_senzory();
     mozek_cilovy_uhel_jizdy = najdi_nejblizsi_rovnobezku(senzory.heading);
     posli_prikaz(CMD_JED_SBIREJ, rychlost);
+    mozek_aktualni_rychlost = rychlost;
 }
 
 
@@ -793,6 +805,15 @@ void mozek_rozhoduj() {
                     posli_prikaz(CMD_STOP);
                     Serial.printf("[MOZEK] Dosažen cíl nájezdu! (Pozice: %d, Lidar: %d)\n", dojeli_pozice, dojeli_lidar);
                     krok = 1;
+                } else if (mozek_aktualni_rychlost > RYCHLOST_DOJEZDU) {
+                    // Logika zpomalení před zdí
+                    float zpomaleni_y = limit_dist_bumper_y + ZPOMALENI_VZDALENOST_MM;
+                    bool blizko_pozice = (senzory.pozice_y >= NV_ARENA_SIZE - zpomaleni_y);
+                    bool blizko_lidar  = (senzory.dist_vpredu <= zpomaleni_y);
+                    if (blizko_pozice || blizko_lidar) {
+                        Serial.println("[MOZEK] Zpomaluji u nájezdu...");
+                        mozek_start_jizdy(RYCHLOST_DOJEZDU);
+                    }
                 }
                 break;
             }
@@ -807,7 +828,7 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     delay(1000);
                     nastav_cil_lajny();
-                    mozek_start_jizdy(15);
+                    mozek_start_jizdy(60);
                     Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
@@ -865,6 +886,21 @@ void mozek_rozhoduj() {
                 }
                 cas_krok_ms = millis();
                 break;
+            } else if (mozek_aktualni_rychlost > RYCHLOST_DOJEZDU) {
+                // Logika zpomalení před zdí
+                float zpomaleni_x = limit_dist_bumper_x + ZPOMALENI_VZDALENOST_MM;
+                bool blizko_lidar = (senzory.dist_vpredu <= zpomaleni_x);
+                bool blizko_x = false;
+                if (navigace.smer_doprava) {
+                    blizko_x = senzory.pozice_x >= navigace.lajna_cil_x - ZPOMALENI_VZDALENOST_MM;
+                } else {
+                    blizko_x = senzory.pozice_x <= navigace.lajna_cil_x + ZPOMALENI_VZDALENOST_MM;
+                }
+
+                if (blizko_lidar || blizko_x) {
+                    Serial.println("[MOZEK] Zpomaluji u zdi...");
+                    mozek_start_jizdy(RYCHLOST_DOJEZDU);
+                }
             }
         }
         break;
@@ -1322,6 +1358,11 @@ void mozek_rozhoduj() {
                     posli_prikaz(CMD_STOP);
                     Serial.printf("[MOZEK] Dosaženo Y=%.0f\n", senzory.pozice_y);
                     krok = 3;
+                } else if (mozek_aktualni_rychlost > RYCHLOST_DOJEZDU) {
+                    if (fabsf(dy) <= 25.0f + ZPOMALENI_VZDALENOST_MM) {
+                        Serial.println("[MOZEK] Zpomaluji u přesunu Y...");
+                        mozek_start_jizdy(RYCHLOST_DOJEZDU);
+                    }
                 }
                 break;
             }
@@ -1394,6 +1435,11 @@ void mozek_rozhoduj() {
                     posli_prikaz(CMD_STOP);
                     Serial.printf("[MOZEK] Dosaženo X=%.0f, startuji čištění k %.0f\n", senzory.pozice_x, navigace.lajna_cil_x);
                     krok = 3;
+                } else if (mozek_aktualni_rychlost > RYCHLOST_DOJEZDU) {
+                    if (fabsf(dx) <= 25.0f + ZPOMALENI_VZDALENOST_MM) {
+                        Serial.println("[MOZEK] Zpomaluji u přesunu X...");
+                        mozek_start_jizdy(RYCHLOST_DOJEZDU);
+                    }
                 }
                 break;
             }
@@ -1482,7 +1528,7 @@ void mozek_start_zapasu() {
         dynamicky_rezim = false;
         uz_vylozil = false;
         Serial.println("[MOZEK] ═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══");
-        mozek_start_jizdy(15);
+        mozek_start_jizdy(60);
         zmen_stav(STAV_NAJEZD_NAHORU);
     } else {
         // ═══ DRUHÝ A DALŠÍ START (dynamický režim) ═══
