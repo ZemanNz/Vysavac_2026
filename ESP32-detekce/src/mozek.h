@@ -29,7 +29,8 @@
 #define SIRKA_ROBOTA_MM       300.0f   // šířka robota = šířka jedné lajny
 #define DELKA_ROBOTA_MM       360.0f   // délka robota
 #define BEZPECNA_VZDALENOST_ZDI    (SIRKA_ROBOTA_MM / 2.0f + 350.0f)  // Zvětšeno o 15cm
-#define BEZPECNA_VZDALENOST_ZDIE_Y (DELKA_ROBOTA_MM / 2.0f + 350.0f)  // Zvětšeno o 15cm
+#define BEZPECNA_VZDALENOST_ZDIE_Y (DELKA_ROBOTA_MM / 2.0f + 350.0f)  // Horní stěna (nájezd)
+#define BEZPECNA_VZDALENOST_DOMOV_Y (DELKA_ROBOTA_MM / 2.0f + 300.0f) // Spodní stěna (domov)
 #define HOME_ZONA_MM          700.0f
 #define MOZEK_HOME_X  (NV_ARENA_SIZE - HOME_ZONA_MM / 2.0f)
 #define MOZEK_HOME_Y  (HOME_ZONA_MM / 2.0f)
@@ -473,7 +474,7 @@ bool vypocti_dalsi_cil(float &out_start_x, float &out_end_x, float &out_y, int &
     // CLAMPING — robot nesmí jet blíž ke zdi
     out_start_x = constrain(out_start_x, BEZPECNA_VZDALENOST_ZDI, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI);
     out_end_x   = constrain(out_end_x,   BEZPECNA_VZDALENOST_ZDI, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI);
-    out_y       = constrain(out_y,        BEZPECNA_VZDALENOST_ZDIE_Y, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDIE_Y);
+    out_y       = constrain(out_y,        BEZPECNA_VZDALENOST_DOMOV_Y, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDIE_Y);
 
     return true;
 }
@@ -626,9 +627,13 @@ void mozek_otoc_se_na(float target_deg) {
             break; 
         }
 
-        int16_t pozadovana_rychlost = (rozdil > 0) ? 10 : -10; // T_CRUISE_SPEED
-        if (fabs(rozdil) <= 12.0f) { // T_SLOWDOWN_DEG
-            pozadovana_rychlost = (rozdil > 0) ? 3 : -3; // T_SLOW_SPEED
+        // Tříúrovňová rychlost otáčení (30%, 10%, 3%)
+        int16_t pozadovana_rychlost = (rozdil > 0) ? 30 : -30;
+        if (fabs(rozdil) <= 60.0f) {
+            pozadovana_rychlost = (rozdil > 0) ? 10 : -10;
+        }
+        if (fabs(rozdil) <= 12.0f) {
+            pozadovana_rychlost = (rozdil > 0) ? 3 : -3;
         }
 
         if (pozadovana_rychlost != aktualni_rychlost) {
@@ -666,6 +671,7 @@ void posli_korekci(int16_t param) {
 }
 
 static float mozek_cilovy_uhel_jizdy = 0.0f;
+static float mozek_startovni_y_prejezdu = 0.0f;
 static unsigned long mozek_posledni_lidar_error_ms = 0;
 
 void mozek_start_jizdy(int rychlost) {
@@ -789,14 +795,14 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
-                    delay(3000);
+                    delay(1000);
                     mozek_otoc_o_90(true);
                     krok = 2;
                 }
                 break;
             case 2:
                 if (rbcx_hotovo()) {
-                    delay(3000);
+                    delay(1000);
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
                     Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
@@ -886,39 +892,55 @@ void mozek_rozhoduj() {
                 break;
             case 2:
                 if (rbcx_hotovo()) {
-                    delay(3000);
+                    delay(1000);
+                    mozek_startovni_y_prejezdu = senzory.pozice_y;
                     mozek_start_jizdy(40);
-                    cas_krok_ms = millis(); // Nutné pro měření času jízdy dolů (case 3)
+                    cas_krok_ms = millis(); 
                     krok = 3;
                 }
                 break;
             case 3: {
+                float ujeto_y = fabsf(mozek_startovni_y_prejezdu - senzory.pozice_y);
+                float cilove_y = mozek_startovni_y_prejezdu - 200.0f;
+                bool jsem_dole = (senzory.pozice_y <= BEZPECNA_VZDALENOST_DOMOV_Y);
+                
+                // [A] Soupeř v cestě
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
-                    if (navigace.smer_doprava)
-                        mozek_otoc_o_90(false);
-                    else
-                        mozek_otoc_o_90(true);
-                    navigace.smer_doprava = !navigace.smer_doprava;
-                    krok = 10;
+                    Serial.printf("[MOZEK] Prejezd PRERUSEN (Souper!) Y: %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
+                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
+                    krok = 4;
                     break;
                 }
-                unsigned long cas_dolu = millis() - cas_krok_ms;
-                bool jsem_dole = (senzory.pozice_y <= BEZPECNA_VZDALENOST_ZDIE_Y + SIRKA_ROBOTA_MM);
-                if (cas_krok_ms > 0 && cas_dolu > 2000) {
-                    float tar_h = navigace.smer_doprava ? -90.0f : 90.0f;
-                    bool volno = !souper_v_smeru(tar_h, 600.0f, 45.0f);
-                    if (volno || jsem_dole || cas_dolu > 8000) {
-                        posli_prikaz(CMD_STOP);
-                        cas_krok_ms = 0;
-                        krok = 4;
-                    }
+
+                // [B] Náraz
+                if (naraz_vpredu()) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.printf("[MOZEK] Prejezd PRERUSEN (Naraz!) Y: %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
+                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
+                    krok = 4;
+                    break;
+                }
+
+                // [C] Cíl nebo dno
+                if (ujeto_y >= 200.0f) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.printf("[MOZEK] Prejezd DOKONCEN: Y %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
+                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
+                    cas_krok_ms = 0;
+                    krok = 4;
+                } else if (jsem_dole) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.printf("[MOZEK] Prejezd ZASTAVEN (DNO): Y %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
+                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
+                    cas_krok_ms = 0;
+                    krok = 4;
                 }
                 break;
             }
             case 4:  // Druhé otočení
                 if (rbcx_hotovo()) {
-                    delay(3000);
+                    delay(1000);
                     if (navigace.smer_doprava)
                         mozek_otoc_o_90(false);
                     else
@@ -928,7 +950,7 @@ void mozek_rozhoduj() {
                 break;
             case 5:  // Hotovo → nová lajna
                 if (rbcx_hotovo()) {
-                    delay(3000);
+                    delay(1000);
                     dalsi_lajna();
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
