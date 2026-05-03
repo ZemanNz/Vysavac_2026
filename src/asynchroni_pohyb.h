@@ -43,7 +43,7 @@ void jed_a_sbirej(float speed) {
 
     // === Akcelerace/Decelerace ===
     const float accel_step = 0.5f;   // plynulý rozjezd
-    const float decel_step = 1.5f;   // rychlé zastavení
+    const float decel_step = 2.0f;   // plynulé ale rychlé zastavení (původně 1.5, pak 10)
 
     // === Rychlosti s polaritou ===
     const float base_speed_left  = POLARITY_LEFT  ? -speed : speed;

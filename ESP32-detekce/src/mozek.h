@@ -894,7 +894,7 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     delay(1000);
                     mozek_startovni_y_prejezdu = senzory.pozice_y;
-                    mozek_start_jizdy(40);
+                    mozek_start_jizdy(35); // Startujeme na 35 %
                     cas_krok_ms = millis(); 
                     krok = 3;
                 }
@@ -904,11 +904,18 @@ void mozek_rozhoduj() {
                 float cilove_y = mozek_startovni_y_prejezdu - 200.0f;
                 bool jsem_dole = (senzory.pozice_y <= BEZPECNA_VZDALENOST_DOMOV_Y);
                 
+                // [Chytré brždění] - pokud zbývá méně než 10 cm, zpomalíme na 15 %
+                static int aktualni_vnitrni_rychlost = 35;
+                if (ujeto_y >= 100.0f && aktualni_vnitrni_rychlost != 15) {
+                    aktualni_vnitrni_rychlost = 15;
+                    posli_prikaz(CMD_JED_SBIREJ, 15);
+                    Serial.println("[MOZEK] Prejezd: Zpomaluji na 15 % pro přesný dojezd.");
+                }
+
                 // [A] Soupeř v cestě
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
-                    Serial.printf("[MOZEK] Prejezd PRERUSEN (Souper!) Y: %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
-                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
+                    aktualni_vnitrni_rychlost = 35; 
                     krok = 4;
                     break;
                 }
@@ -916,23 +923,15 @@ void mozek_rozhoduj() {
                 // [B] Náraz
                 if (naraz_vpredu()) {
                     posli_prikaz(CMD_STOP);
-                    Serial.printf("[MOZEK] Prejezd PRERUSEN (Naraz!) Y: %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
-                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
+                    aktualni_vnitrni_rychlost = 35;
                     krok = 4;
                     break;
                 }
 
                 // [C] Cíl nebo dno
-                if (ujeto_y >= 200.0f) {
+                if (ujeto_y >= 200.0f || jsem_dole) {
                     posli_prikaz(CMD_STOP);
-                    Serial.printf("[MOZEK] Prejezd DOKONCEN: Y %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
-                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
-                    cas_krok_ms = 0;
-                    krok = 4;
-                } else if (jsem_dole) {
-                    posli_prikaz(CMD_STOP);
-                    Serial.printf("[MOZEK] Prejezd ZASTAVEN (DNO): Y %.0f -> %.0f (ujeto %.1f mm, cil byl %.0f)\n", 
-                        mozek_startovni_y_prejezdu, senzory.pozice_y, ujeto_y, cilove_y);
+                    aktualni_vnitrni_rychlost = 35;
                     cas_krok_ms = 0;
                     krok = 4;
                 }
@@ -940,6 +939,11 @@ void mozek_rozhoduj() {
             }
             case 4:  // Druhé otočení
                 if (rbcx_hotovo()) {
+                    float final_y = senzory.pozice_y;
+                    float ujeto_total = fabsf(mozek_startovni_y_prejezdu - final_y);
+                    Serial.printf("[MOZEK] Prejezd REALNE DOKONCEN: Y %.0f -> %.0f (ujeto CELKEM %.1f mm, cil bylo 200)\n", 
+                        mozek_startovni_y_prejezdu, final_y, ujeto_total);
+
                     delay(1000);
                     if (navigace.smer_doprava)
                         mozek_otoc_o_90(false);
