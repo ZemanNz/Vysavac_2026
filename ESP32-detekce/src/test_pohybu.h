@@ -168,7 +168,7 @@ void jed_a_sbirej_lidar(int speed) {
         }
 
         // Bezpečnostní stop podle LiDARu (250 mm od zdi)
-        if (nv_dist_front < 250.0f) {
+        if (nv_dist_front < 300.0f) {
             Serial.printf("[TEST] Lidar detekoval zed (%.1f mm)! Zastavuji.\n", nv_dist_front);
             test_posli_prikaz(CMD_STOP);
             break;
@@ -200,13 +200,24 @@ void test_pohybu_sekvence() {
     pockej_ms(3000);
 
     Serial.println("[TEST] Krok 2: Jizda vpred dokud nebudu 25 cm od zdi...");
-    jed_a_sbirej_lidar(40);
+    jed_a_sbirej_lidar(60);
 
     Serial.println("[TEST] Cekam 3 sekundy...");
     pockej_ms(3000);
 
     Serial.println("[TEST] Krok 3: Otoceni o 90° vlevo...");
     otoc_se(true, false);
+
+    pockej_ms(3000);
+
+    jed_a_sbirej_lidar(60);
+
+    pockej_ms(3000);
+
+    Serial.println("[TEST] Krok 4: Otoceni o 90° vlevo...");
+    otoc_se(true, false);
+
+
 
     Serial.println("[TEST] === VSECHNY TESTY DOKONCENY ===");
 }
