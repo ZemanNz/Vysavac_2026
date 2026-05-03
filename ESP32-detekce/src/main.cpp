@@ -10,8 +10,8 @@
 //                     (vyžaduje USE_VIZ 0)
 // ============================================================
 #define USE_VIZ    0
-#define USE_MOZEK  0 // Vypneme mozek pro testovani
-#define USE_TEST   1 // Zapneme testovani pohybu
+#define USE_MOZEK  1 // Vypneme mozek pro testovani
+#define USE_TEST   0 // Zapneme testovani pohybu
 
 #if USE_VIZ
     #include "lidar.h"
