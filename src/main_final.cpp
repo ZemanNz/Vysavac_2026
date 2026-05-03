@@ -21,6 +21,8 @@
 rkConfig cfg;
 
 char nase_barva = 'R';
+volatile bool g_puk_roztrizen = false;
+volatile bool g_zadost_o_srovnani = false;
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
 // =============================================================================
@@ -197,8 +199,10 @@ void setup(){
     rkUartInit();
 
     xTaskCreate(uart_vlakno, "UartVlakno", 4096, NULL, 2, NULL);
+    xTaskCreate(tridici_vlakno, "TridiciVlakno", 4096, NULL, 1, NULL);
 
     rkLedGreen(true);
+    srovnej_trididlo(); // Počáteční kalibrace třídiče
     Serial.println("=== RBCX READY ===");
 
     // =========================================================================
@@ -245,9 +249,16 @@ void setup(){
                 case CMD_OTOC_VLEVO:
                     aktualni_stav = STAT_BUSY;
                     posli_stav();
+                    
+                    if (g_puk_roztrizen) {
+                        g_zadost_o_srovnani = true;
+                        g_puk_roztrizen = false;
+                    }
+
                     Serial.printf(">> Otacim se VLEVO o %d stupnu...\n", param);
                     turn_on_spot_left((float)param, 30);
                     Serial.println(">> Otoceno VLEVO.");
+
                     aktualni_stav = STAT_DONE;
                     posli_stav();
                     aktualni_stav = STAT_READY;
@@ -256,9 +267,16 @@ void setup(){
                 case CMD_OTOC_VPRAVO:
                     aktualni_stav = STAT_BUSY;
                     posli_stav();
+                    
+                    if (g_puk_roztrizen) {
+                        g_zadost_o_srovnani = true;
+                        g_puk_roztrizen = false;
+                    }
+
                     Serial.printf(">> Otacim se VPRAVO o %d stupnu...\n", param);
                     turn_on_spot_right((float)param, 30);
                     Serial.println(">> Otoceno VPRAVO.");
+
                     aktualni_stav = STAT_DONE;
                     posli_stav();
                     aktualni_stav = STAT_READY;

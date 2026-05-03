@@ -82,11 +82,6 @@ void jed_a_sbirej(float speed, int mm = 0) {
     enum Phase { ACCELERATE, CRUISE, DECELERATE, STOPPED };
     Phase phase = ACCELERATE;
 
-    // Třídění
-    int tridici_counter = 0;
-    int lokalni_pocitadlo = 0;
-    float r = 0, g = 0, b = 0;
-
     zastav_jizdu = false;
 
 
@@ -239,38 +234,6 @@ void jed_a_sbirej(float speed, int mm = 0) {
         ml.speed(pct_to_speed(speed_left));
         mr.speed(pct_to_speed(speed_right));
 
-        // --- 6) TŘÍDĚNÍ PUKŮ ---
-        tridici_counter++;
-        if (tridici_counter >= 10) {
-            tridici_counter = 0;
-
-            bool sensor_ok = rkColorSensorGetRGB("front", &r, &g, &b);
-
-            // DEBUG výpis
-            static int debug_cnt = 0;
-            debug_cnt++;
-            if (debug_cnt % 5 == 0) {
-                Serial.printf("TRID: sensor=%s  R:%.0f G:%.0f B:%.0f  phase:%d  sL:%.1f sR:%.1f  L:%d R:%d\n",
-                    sensor_ok ? "OK" : "FAIL", r, g, b, phase, current_speed_left, current_speed_right, left_pos, right_pos);
-            }
-
-            if (sensor_ok) {
-                char barva = urci_barvu_puku(r, g, b);
-                if (barva != 'N') {
-                    Serial.printf(">> PUK: %c\n", barva);
-                    roztrid_puk(barva);
-                    if (barva == nase_barva) {
-                        pocet_nasich_puku++;
-                    }
-                    lokalni_pocitadlo++;
-                    if (lokalni_pocitadlo >= 5) {
-                        srovnej_trididlo();
-                        lokalni_pocitadlo = 0;
-                    }
-                }
-            }
-        }
     }
-
     Serial.printf("=== KONEC === nasich: %d\n", pocet_nasich_puku);
 }

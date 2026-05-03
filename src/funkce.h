@@ -55,6 +55,9 @@ void srovnej_trididlo() {
 
 // Proměnná "nase_barva", kterou definujeme v main.cpp
 extern char nase_barva;
+extern volatile int pocet_nasich_puku;
+extern volatile bool g_puk_roztrizen;
+extern volatile bool g_zadost_o_srovnani;
 
 char urci_barvu_puku(float &r, float &g, float &b) {
     // 1) Ochrana před falešnou detekcí na prázdno (hodnoty si bývají velmi blízké, např R:114, G:114, B:107)
@@ -116,6 +119,11 @@ void tridici_vlakno(void *pvParameters) {
             if (barva != 'N') {
                 // Pošleme TŘÍDÍCÍ FUNKCI POUZE PÍSMENO zjištěné barvy
                 roztrid_puk(barva);
+                g_puk_roztrizen = true;
+                
+                if (barva == nase_barva) {
+                    pocet_nasich_puku++;
+                }
                 
                 pocitadlo_puku++;
                 
@@ -128,6 +136,12 @@ void tridici_vlakno(void *pvParameters) {
                 // Počkáme chvilku po roztřídění, ať si třídič "oddechne" (sníženo na 100ms z 500ms)
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
+        }
+        
+        // Asynchronní požadavek na srovnání třídiče (např. během otáčení)
+        if (g_zadost_o_srovnani) {
+            srovnej_trididlo();
+            g_zadost_o_srovnani = false;
         }
         
         // Zpoždění aby vlákno neběželo na 100% zátěži CPU (FreeRTOS)
