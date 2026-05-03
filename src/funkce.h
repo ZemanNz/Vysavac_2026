@@ -58,6 +58,8 @@ extern char nase_barva;
 extern volatile int pocet_nasich_puku;
 extern volatile bool g_puk_roztrizen;
 extern volatile bool g_zadost_o_srovnani;
+extern volatile int g_lajny_bez_puku;
+extern volatile int pocet_roz_p;
 
 char urci_barvu_puku(float &r, float &g, float &b) {
     // 1) Ochrana před falešnou detekcí na prázdno (hodnoty si bývají velmi blízké, např R:114, G:114, B:107)
@@ -120,17 +122,11 @@ void tridici_vlakno(void *pvParameters) {
                 // Pošleme TŘÍDÍCÍ FUNKCI POUZE PÍSMENO zjištěné barvy
                 roztrid_puk(barva);
                 g_puk_roztrizen = true;
+                pocet_roz_p++;       // Počítadlo celkově roztříděných puků
+                g_lajny_bez_puku = 0; // Reset počítadla lajn bez puků
                 
                 if (barva == nase_barva) {
                     pocet_nasich_puku++;
-                }
-                
-                pocitadlo_puku++;
-                
-                // Po 5 roztřídění zavoláme tvoji novou srovnávací funkci
-                if (pocitadlo_puku >= 5) {
-                    srovnej_trididlo();
-                    pocitadlo_puku = 0; // Vynulovat pro další cyklus
                 }
                 
                 // Počkáme chvilku po roztřídění, ať si třídič "oddechne" (sníženo na 100ms z 500ms)

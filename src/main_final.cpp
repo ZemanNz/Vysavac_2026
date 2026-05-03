@@ -23,6 +23,9 @@ rkConfig cfg;
 char nase_barva = 'R';
 volatile bool g_puk_roztrizen = false;
 volatile bool g_zadost_o_srovnani = false;
+volatile int g_lajny_bez_puku = 0;
+volatile int pocet_roz_p = 0;
+volatile bool g_ujeta_lajna = false;
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 
 // =============================================================================
@@ -238,6 +241,7 @@ void setup(){
                     Serial.printf(">> Jedu dopredu na %d%% a sbiram puky (cil: %d mm)...\n", param, param2);
                     
                     jed_a_sbirej((float)param, param2);
+                    g_ujeta_lajna = true;
                     
                     rkLedYellow(false);
                     Serial.printf(">> Zastaveno. Nasbirano %d nasich puku.\n", pocet_nasich_puku);
@@ -250,10 +254,20 @@ void setup(){
                     aktualni_stav = STAT_BUSY;
                     posli_stav();
                     
-                    if (g_puk_roztrizen) {
+                    if (pocet_roz_p >= 3) {
                         g_zadost_o_srovnani = true;
-                        g_puk_roztrizen = false;
+                        pocet_roz_p = 0;
+                        g_lajny_bez_puku = 0;
+                    } else if (g_ujeta_lajna && !g_puk_roztrizen) {
+                        g_lajny_bez_puku++;
+                        if (g_lajny_bez_puku >= 4) {
+                            g_zadost_o_srovnani = true;
+                            g_lajny_bez_puku = 0;
+                            Serial.println(">> Dlouho bez puku -> srovnavam trididlo");
+                        }
                     }
+                    g_puk_roztrizen = false;
+                    g_ujeta_lajna = false;
 
                     Serial.printf(">> Otacim se VLEVO o %d stupnu...\n", param);
                     turn_on_spot_left((float)param, 30);
@@ -268,10 +282,20 @@ void setup(){
                     aktualni_stav = STAT_BUSY;
                     posli_stav();
                     
-                    if (g_puk_roztrizen) {
+                    if (pocet_roz_p >= 3) {
                         g_zadost_o_srovnani = true;
-                        g_puk_roztrizen = false;
+                        pocet_roz_p = 0;
+                        g_lajny_bez_puku = 0;
+                    } else if (g_ujeta_lajna && !g_puk_roztrizen) {
+                        g_lajny_bez_puku++;
+                        if (g_lajny_bez_puku >= 4) {
+                            g_zadost_o_srovnani = true;
+                            g_lajny_bez_puku = 0;
+                            Serial.println(">> Dlouho bez puku -> srovnavam trididlo");
+                        }
                     }
+                    g_puk_roztrizen = false;
+                    g_ujeta_lajna = false;
 
                     Serial.printf(">> Otacim se VPRAVO o %d stupnu...\n", param);
                     turn_on_spot_right((float)param, 30);
@@ -332,6 +356,20 @@ void setup(){
                 // ─────────────────────────────────────────────────
                 case CMD_TOC_KONTINUALNE:
                     aktualni_stav = STAT_READY;
+                    if (pocet_roz_p >= 3) {
+                        g_zadost_o_srovnani = true;
+                        pocet_roz_p = 0;
+                        g_lajny_bez_puku = 0;
+                    } else if (g_ujeta_lajna && !g_puk_roztrizen) {
+                        g_lajny_bez_puku++;
+                        if (g_lajny_bez_puku >= 4) {
+                            g_zadost_o_srovnani = true;
+                            g_lajny_bez_puku = 0;
+                            Serial.println(">> Dlouho bez puku -> srovnavam trididlo");
+                        }
+                    }
+                    g_puk_roztrizen = false;
+                    g_ujeta_lajna = false;
                     posli_stav();
                     if (param != 0) {
                         Serial.printf(">> Tocim se nekonecne (rychlost: %d)...\n", param);
