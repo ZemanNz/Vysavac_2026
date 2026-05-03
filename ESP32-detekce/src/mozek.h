@@ -873,19 +873,16 @@ void mozek_rozhoduj() {
                     krok = 10;
                     break;
                 }
-                posli_prikaz(CMD_COUVEJ, 100);
-                krok = 1;
+                // Už necouváme před otáčením (na přání uživatele)
+                if (navigace.smer_doprava)
+                    mozek_otoc_o_90(false);
+                else
+                    mozek_otoc_o_90(true);
+                krok = 2; 
                 break;
             }
             case 1:
-                if (rbcx_hotovo()) {
-                    delay(3000);
-                    if (navigace.smer_doprava)
-                        mozek_otoc_o_90(false);
-                    else
-                        mozek_otoc_o_90(true);
-                    krok = 2;
-                }
+                // Nepoužito (dříve čekání na couvnutí)
                 break;
             case 2:
                 if (rbcx_hotovo()) {

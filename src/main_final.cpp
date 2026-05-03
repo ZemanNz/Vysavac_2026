@@ -318,28 +318,9 @@ void setup() {
             }
         }
 
-        // === MANUÁLNÍ OVLÁDÁNÍ (testování bez ESP32) ===
-        if (rkButtonLeft(true)) {
-            delay(500);
-            Serial.println("\n[MANUAL] <<< LEFT >>> jed_a_sbirej(60)");
-            zastav_jizdu = false;
-            aktualni_stav = STAT_BUSY;
-            rkLedYellow(true);
-            jed_a_sbirej(60);
-            rkLedYellow(false);
-            Serial.println("[MANUAL] Zastaveno.");
-            aktualni_stav = STAT_READY;
-        }
-
-        if (rkButtonRight(true)) {
-            delay(500);
-            Serial.println("\n[MANUAL] <<< RIGHT >>> otoc vpravo 90");
-            aktualni_stav = STAT_BUSY;
-            turn_on_spot_right(90, 30);
-            Serial.println("[MANUAL] Otoceno.");
-            aktualni_stav = STAT_READY;
-        }
-
+        // Manuální ovládání pomocí tlačítek bylo dočasně deaktivováno, 
+        // protože dotyk bumperu o zeď vyvolával nechtěné chování.
+        
         delay(20);
     }
 }
