@@ -49,6 +49,7 @@ enum CmdID : uint8_t {
     CMD_VYLOZ           = 0x06,  // Otevření zásobníků (jen otevři!)
     CMD_ZAVRI_ZASOBNIKY = 0x07,  // Zavření zásobníků + reset počtu puků
     CMD_TOC_KONTINUALNE = 0x08,  // Zapne rotaci na místě a neukončí ji (čeká na CMD_STOP z ESP32)
+    CMD_LIDAR_ERROR     = 0x09,  // Průběžná chyba úhlu z LiDARu (param = odchylka v desetinách stupně)
 };
 
 // Statusy (RBCX → ESP32) — MUSÍ odpovídat StatID v mozek.h!
@@ -70,6 +71,7 @@ const char* cmd_name(uint8_t cmd) {
         case CMD_VYLOZ:           return "VYLOZ";
         case CMD_ZAVRI_ZASOBNIKY: return "ZAVRI_ZASOBNIKY";
         case CMD_TOC_KONTINUALNE: return "TOC_KONTINUALNE";
+        case CMD_LIDAR_ERROR:     return "LIDAR_ERROR";
         default:                  return "???";
     }
 }
@@ -136,6 +138,9 @@ void uart_vlakno(void *pvParameters) {
 
             if (cmd.cmd == CMD_NOP) {
                 posli_stav();
+            } else if (cmd.cmd == CMD_LIDAR_ERROR) {
+                // Přišla korekce z LiDARu (v desetinách stupně)
+                g_lidar_error = cmd.param / 10.0f;
             } else {
                 // Pokud přijde nový příkaz a jedeme, zastav
                 zastav_jizdu = true;

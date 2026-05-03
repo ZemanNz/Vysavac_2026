@@ -18,6 +18,7 @@
 // Globální flagy
 volatile bool zastav_jizdu = false;
 volatile int pocet_nasich_puku = 0;
+volatile float g_lidar_error = 0.0f;
 
 // Převod procent na ticky/s
 static inline int16_t pct_to_speed(float pct) {
@@ -34,8 +35,9 @@ void jed_a_sbirej(float speed) {
     auto& mr = man.motor(MOTOR_RIGHT);
     auto& btns = man.buttons();
 
-    // === P-regulátor z forward_acc ===
-    const float m_kp = 0.12f;
+    // === Kombinovaný regulátor (Enkodéry + LiDAR) ===
+    const float m_kp = 0.12f;          // P-složka pro enkodéry (rychlá odezva)
+    const float m_lidar_kp = 0.5f;     // P-složka pro LiDAR (pomalá korekce absolutního úhlu)
     const float m_min_speed = 18.0f;
     const float m_max_correction = 3.0f;
 
@@ -61,6 +63,8 @@ void jed_a_sbirej(float speed) {
 
     int left_pos = 0;
     int right_pos = 0;
+
+    g_lidar_error = 0.0f; // Reset LiDAR odchylky před startem jízdy
 
     // Fáze
     enum Phase { ACCELERATE, CRUISE, DECELERATE, STOPPED };
@@ -151,14 +155,21 @@ void jed_a_sbirej(float speed) {
         float speed_left  = current_speed_left;
         float speed_right = current_speed_right;
 
-        // --- 4) P-REGULÁTOR — POUZE V CRUISE FÁZI ---
+        // --- 4) KOMBINOVANÝ REGULÁTOR — POUZE V CRUISE FÁZI ---
         if (phase == CRUISE) {
+            // 1. Klasický P-regulátor z enkodérů (drží kola ve stejných otáčkách)
             float progres_left  = (float)abs(left_pos);
             float progres_right = (float)abs(right_pos);
             float sum = progres_left + progres_right + 1.0f;
             float rozdil_progres = (progres_left / sum) - (progres_right / sum);
+            float enc_correction = rozdil_progres * m_kp * 1800.0f;
 
-            float correction = rozdil_progres * m_kp * 1800;
+            // 2. Dlouhodobá složka z LiDARu (pomalá korekce absolutního úhlu)
+            // Kladný g_lidar_error = cíl je vpravo -> potřebujeme zápornou korekci k zatočení vpravo
+            float lid_correction = -(g_lidar_error * m_lidar_kp); 
+
+            // 3. Sečtení a oříznutí
+            float correction = enc_correction + lid_correction;
             correction = std::max(-m_max_correction, std::min(correction, m_max_correction));
 
             // Aplikace korekce — PŘESNĚ JAKO V forward_acc

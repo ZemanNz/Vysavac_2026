@@ -23,7 +23,8 @@ enum CmdIDTest : uint8_t {
     CMD_JED_SBIREJ      = 0x02,
     CMD_OTOC_VLEVO      = 0x03,
     CMD_OTOC_VPRAVO     = 0x04,
-    CMD_TOC_KONTINUALNE = 0x08 
+    CMD_TOC_KONTINUALNE = 0x08,
+    CMD_LIDAR_ERROR     = 0x09
 };
 
 void test_uart_init() {
@@ -136,6 +137,50 @@ void otoc_se(bool vlevo, bool jen_zarovnat = false) {
 }
 
 // =============================================================================
+//  JÍZDA S LIDAR KOREKCÍ
+// =============================================================================
+
+void jed_a_sbirej_lidar(int speed) {
+    // 1. Zjištění aktuálního úhlu a výpočet cíle
+    float heading_deg = nv_g_h * 180.0f / PI;
+    float target_deg = najdi_nejblizsi_rovnobezku(heading_deg);
+
+    Serial.printf("\n[TEST] ---> Start jizdy s LiDARem. Cil: %.1f° (rychlost %d)\n", target_deg, speed);
+
+    test_posli_prikaz(CMD_JED_SBIREJ, speed);
+
+    unsigned long last_update = 0;
+
+    while (true) {
+        // Udržujeme LiDAR neustále aktualizovaný
+        loop_lidar_nv();
+
+        // Korekce se posílá např. každých 30 ms
+        if (millis() - last_update > 30) {
+            heading_deg = nv_g_h * 180.0f / PI;
+            float rozdil = vypocti_rozdil_uhlu(target_deg, heading_deg); // kladné = cíl je vpravo od nás
+            
+            // Posíláme chybu v desetinách stupně
+            int16_t param_err = (int16_t)roundf(rozdil * 10.0f);
+            test_posli_prikaz(CMD_LIDAR_ERROR, param_err);
+            
+            last_update = millis();
+        }
+
+        // Bezpečnostní stop podle LiDARu (250 mm od zdi)
+        if (nv_dist_front < 250.0f) {
+            Serial.printf("[TEST] Lidar detekoval zed (%.1f mm)! Zastavuji.\n", nv_dist_front);
+            test_posli_prikaz(CMD_STOP);
+            break;
+        }
+
+        delay(5);
+    }
+
+    Serial.println("[TEST] <--- Konec jizdy s LiDARem.\n");
+}
+
+// =============================================================================
 //  INICIALIZACE A SEKVENCE (voláno z main.cpp)
 // =============================================================================
 
@@ -148,21 +193,20 @@ void test_pohybu_sekvence() {
     Serial.println("[TEST] Cekam 5 sekund na boot a nacteni LiDARu...");
     pockej_ms(5000); 
 
-    
     Serial.println("[TEST] Krok 1: Pouhe zarovnani podle zdi...");
     otoc_se(false, true);
 
     Serial.println("[TEST] Cekam 3 sekundy...");
     pockej_ms(3000);
 
-    Serial.println("[TEST] Krok 2: Otoceni o 90° vlevo...");
-    otoc_se(true, false);
+    Serial.println("[TEST] Krok 2: Jizda vpred dokud nebudu 25 cm od zdi...");
+    jed_a_sbirej_lidar(40);
 
     Serial.println("[TEST] Cekam 3 sekundy...");
     pockej_ms(3000);
 
-    Serial.println("[TEST] Krok 3: Otoceni zpet (90° vpravo)...");
-    otoc_se(false, false);
+    Serial.println("[TEST] Krok 3: Otoceni o 90° vlevo...");
+    otoc_se(true, false);
 
     Serial.println("[TEST] === VSECHNY TESTY DOKONCENY ===");
 }
