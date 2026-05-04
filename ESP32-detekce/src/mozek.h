@@ -942,7 +942,15 @@ void mozek_rozhoduj() {
                 }
                 break;
             case 3: {
-                // Čekáme, až RBCX samo dojede do cíle (250mm)
+                // [A] Náraz (tlačítka) - MUSÍ BÝT PRVNÍ, protože náraz zastaví jízdu a rbcx_hotovo by pak bylo true
+                if (naraz_vpredu()) {
+                    Serial.println("[MOZEK] Prejezd PRERUSEN (Naraz!) -> couvám 10cm");
+                    posli_prikaz(CMD_COUVEJ, 100);
+                    krok = 4;
+                    break;
+                }
+
+                // [B] Čekáme, až RBCX samo dojede do cíle (250mm)
                 if (rbcx_hotovo()) {
                     float final_y = senzory.pozice_y;
                     float final_lidar = senzory.dist_vpredu;
@@ -953,7 +961,7 @@ void mozek_rozhoduj() {
                     break;
                 }
 
-                // [A] Soupeř v cestě
+                // [C] Soupeř v cestě
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Prejezd PRERUSEN (Souper!)");
@@ -961,16 +969,7 @@ void mozek_rozhoduj() {
                     break;
                 }
 
-                // [B] Náraz (tlačítka)
-                if (naraz_vpredu()) {
-                    posli_prikaz(CMD_STOP);
-                    Serial.println("[MOZEK] Prejezd PRERUSEN (Naraz!) -> couvám 10cm");
-                    posli_prikaz(CMD_COUVEJ, 100);
-                    krok = 4;
-                    break;
-                }
-
-                // [C] Bezpečnostní pojistka u zdi (Lidar)
+                // [D] Bezpečnostní pojistka u zdi (Lidar)
                 if (senzory.dist_vpredu <= 300.0f) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Prejezd ZASTAVEN (ZED!)");
@@ -1265,6 +1264,12 @@ void mozek_rozhoduj() {
                 break;
 
             case 40:
+                if (naraz_vpredu()) {
+                    Serial.println("[MOZEK] Náraz při popojíždění u vykládky! Couvám 10cm...");
+                    posli_prikaz(CMD_COUVEJ, 100);
+                    krok = 45; // Počkáme v kroku 45 (souper_volno) na vyčištění cesty
+                    break;
+                }
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
                     vyklad_zbyva_ms -= (millis() - cas_krok_ms);
@@ -1370,6 +1375,12 @@ void mozek_rozhoduj() {
                 }
                 break;
             case 2: {
+                if (naraz_vpredu()) {
+                    Serial.println("[MOZEK] Náraz při přesunu Y! Couvám 10cm...");
+                    posli_prikaz(CMD_COUVEJ, 100);
+                    krok = 20; // Počkej na volno v kroku 20
+                    break;
+                }
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Soupeř v cestě (PRESUN_Y)! Čekám...");
@@ -1446,6 +1457,12 @@ void mozek_rozhoduj() {
                 }
                 break;
             case 2: {
+                if (naraz_vpredu()) {
+                    Serial.println("[MOZEK] Náraz při přesunu X! Couvám 10cm...");
+                    posli_prikaz(CMD_COUVEJ, 100);
+                    krok = 21; // Počkej na volno v kroku 21
+                    break;
+                }
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Soupeř v cestě (PRESUN_X)! Čekám...");
