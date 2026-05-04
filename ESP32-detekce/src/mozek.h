@@ -787,7 +787,6 @@ void mozek_rozhoduj() {
                 }
                 // [C] Náraz vpředu
                 if (naraz_vpredu()) {
-                    posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Náraz vpředu u nájezdu → couvám a pak doleva");
                     posli_prikaz(CMD_COUVEJ, 100); // Couvni 10cm
                     krok = 1;
@@ -856,7 +855,6 @@ void mozek_rozhoduj() {
 
         // [C] Náraz vpředu (tlačítka) → couvni a přejeď na další lajnu
         if (naraz_vpredu()) {
-            posli_prikaz(CMD_STOP);
             Serial.println("[MOZEK] Náraz vpředu → couvám 10cm...");
             posli_prikaz(CMD_COUVEJ, 100);
             
@@ -937,7 +935,7 @@ void mozek_rozhoduj() {
                     mozek_startovni_lidar_prejezdu = senzory.dist_vpredu;
                     
                     // Přejezd 25 cm pomocí enkodérů na RBCX
-                    posli_prikaz(CMD_JED_SBIREJ, 35, 250); 
+                    posli_prikaz(CMD_JED_SBIREJ, 25, 250); 
                     
                     cas_krok_ms = millis(); 
                     krok = 3;
@@ -1179,21 +1177,42 @@ void mozek_rozhoduj() {
                     krok = 11;
                 }
                 break;
-            case 11:  // Jedeme do HOME, hlídáme soupeře
+            case 11:  // Jedeme do HOME, hlídáme soupeře, zeď a náraz
+                if (naraz_vpredu()) {
+                    Serial.println("[MOZEK] Náraz při návratu domů! Couvám 10cm a počkám...");
+                    posli_prikaz(CMD_COUVEJ, 100);
+                    krok = 13; // Počkej na docouvání a pak čekej na volno
+                    break;
+                }
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Soupeř blokuje cestu domů! Čekám...");
                     krok = 12;
-                } else if (senzory.pozice_x >= NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI) {
-                    posli_prikaz(CMD_STOP);
-                    krok = 20;
+                    break;
+                }
+                
+                // Kontrola zdi (Lidar i Pozice) - sjednoceno s logikou lajn
+                {
+                    bool limit_x = (senzory.pozice_x >= NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI);
+                    bool limit_lidar = (senzory.dist_vpredu <= BEZPECNA_VZDALENOST_ZDI);
+                    if (limit_x || limit_lidar) {
+                        posli_prikaz(CMD_STOP);
+                        Serial.printf("[MOZEK] Dosažen cíl u HOME (Pozice:%d, Lidar:%d)\n", limit_x, limit_lidar);
+                        krok = 20;
+                    }
                 }
                 break;
             case 12:  // Čekáme na uvolnění cesty
                 if (souper_volno()) {
                     Serial.println("[MOZEK] Cesta volná, pokračuji domů.");
-                    mozek_start_jizdy(60);
-                    krok = 11;
+                    krok = 10; // Znovu zahaj jízdu (včetně nového zamíření)
+                }
+                break;
+
+            case 13: // Sub-krok po nárazu v kroku 11
+                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Docouváno, nyní čekám na volnou cestu...");
+                    krok = 12; 
                 }
                 break;
 

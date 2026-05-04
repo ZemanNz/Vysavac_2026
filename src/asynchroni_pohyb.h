@@ -20,6 +20,8 @@ volatile bool zastav_jizdu = false;
 volatile int pocet_nasich_puku = 0;
 volatile float g_lidar_error = 0.0f;
 
+bool byly_tlacitka = false;
+
 extern rkConfig cfg; 
 
 const float m_wheel_circumference = cfg.motor_wheel_diameter * M_PI; 
@@ -110,6 +112,7 @@ void jed_a_sbirej(float speed, int mm = 0) {
         // Jedno tlačítko stačí → decelerate okamžitě
         if ((btns.up() || btns.down()) && phase != DECELERATE && phase != STOPPED) {
             Serial.printf(">> BTN HIT (up=%d down=%d) -> DECELERATE\n", btns.up(), btns.down());
+            byly_tlacitka = true;
             phase = DECELERATE;
         }
 
@@ -186,7 +189,7 @@ void jed_a_sbirej(float speed, int mm = 0) {
         float speed_right = current_speed_right;
 
         // --- 4) KOMBINOVANÝ REGULÁTOR — POUZE V CRUISE FÁZI ---
-        if (phase == CRUISE) {
+        if (phase == CRUISE && (mm == 0)) {
             // 1. Klasický P-regulátor z enkodérů (drží kola ve stejných otáčkách)
             float progres_left  = (float)abs(left_pos);
             float progres_right = (float)abs(right_pos);

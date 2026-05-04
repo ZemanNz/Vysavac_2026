@@ -121,6 +121,8 @@ RbcxStatus sestav_stav(int16_t extra_param = 0) {
     if (btns.down())  s.buttons |= (1 << 1);  // bit 1
     if (btns.left())  s.buttons |= (1 << 2);  // bit 2
     if (btns.right()) s.buttons |= (1 << 3);  // bit 3
+
+    if(byly_tlacitka) s.buttons |= (1 << 0);  // bit 0
     
     s.pocet_puku = pocet_nasich_puku;
     s.param = extra_param;
@@ -172,10 +174,11 @@ void uart_vlakno(void *pvParameters) {
         auto& btns = rb::Manager::get().buttons();
         if (millis() - posledni_serial > 1000) {
             posledni_serial = millis();
-            Serial.printf("[STAV] %s | BTN: U=%d D=%d L=%d R=%d | puky=%d\n",
+            Serial.printf("[STAV] %s | BTN: U=%d D=%d L=%d R=%d | puky=%d | BATT: %dmV (%d%%)\n",
                 stav_name(aktualni_stav),
                 btns.up(), btns.down(), btns.left(), btns.right(),
-                pocet_nasich_puku);
+                pocet_nasich_puku,
+                rkBatteryVoltageMv(), rkBatteryPercent());
         }
 
         vTaskDelay(pdMS_TO_TICKS(5)); // Sníženo z 20ms pro rychlejší reakci na STOP/změnu rychlosti
@@ -247,6 +250,7 @@ void setup(){
                     Serial.printf(">> Zastaveno. Nasbirano %d nasich puku.\n", pocet_nasich_puku);
                     aktualni_stav = STAT_DONE;
                     posli_stav();
+                    byly_tlacitka = false;
                     aktualni_stav = STAT_READY;
                     break;
 
