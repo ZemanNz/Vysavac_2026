@@ -788,9 +788,8 @@ void mozek_rozhoduj() {
                 // [C] Náraz vpředu
                 if (naraz_vpredu()) {
                     posli_prikaz(CMD_STOP);
-                    Serial.println("[MOZEK] Náraz vpředu u nájezdu → jdu rovnou doleva");
-                    mozek_otoc_o_90(true);
-                    cas_krok_ms = millis();
+                    Serial.println("[MOZEK] Náraz vpředu u nájezdu → couvám a pak doleva");
+                    posli_prikaz(CMD_COUVEJ, 100); // Couvni 10cm
                     krok = 1;
                     break;
                 }
@@ -858,14 +857,15 @@ void mozek_rozhoduj() {
         // [C] Náraz vpředu (tlačítka) → couvni a přejeď na další lajnu
         if (naraz_vpredu()) {
             posli_prikaz(CMD_STOP);
+            Serial.println("[MOZEK] Náraz vpředu → couvám 10cm...");
+            posli_prikaz(CMD_COUVEJ, 100);
+            
+            // Počkáme na dokončení couvání v novém sub-stavu
             if (senzory.pozice_y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0f))) {
-                Serial.println("[MOZEK] Náraz vpředu → couvám + další lajna");
                 zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
             } else {
-                Serial.println("[MOZEK] Náraz zcela dole → VYKLÁDÁM");
                 zmen_stav(STAV_VYKLADAM_PUKY);
             }
-            cas_krok_ms = millis();
             break;
         }
 
@@ -884,7 +884,6 @@ void mozek_rozhoduj() {
                     Serial.printf("[MOZEK] Lajna na dně Y=%.0f hotová → VYKLÁDÁM\n", senzory.pozice_y);
                     zmen_stav(STAV_VYKLADAM_PUKY);
                 }
-                cas_krok_ms = millis();
                 break;
             } else if (mozek_aktualni_rychlost > RYCHLOST_DOJEZDU) {
                 // Logika zpomalení před zdí
@@ -911,6 +910,8 @@ void mozek_rozhoduj() {
     case STAV_PRECHOD_NA_DALSI_LAJNU:
         switch (krok) {
             case 0: {
+                if (!rbcx_hotovo()) break; // Počkej na couvání
+
                 if (souper_v_smeru(180.0f, 500.0f, 45.0f)) {
                     Serial.println("[MOZEK] Lidar vidí soupeře pod námi! Otáčím zpět.");
                     navigace.smer_doprava = !navigace.smer_doprava;
@@ -918,7 +919,7 @@ void mozek_rozhoduj() {
                     krok = 10;
                     break;
                 }
-                // Už necouváme před otáčením (na přání uživatele)
+                // Už necouváme před otáčením (na přání uživatele) -> couváme teď automaticky při nárazu
                 if (navigace.smer_doprava)
                     mozek_otoc_o_90(false);
                 else
@@ -965,7 +966,8 @@ void mozek_rozhoduj() {
                 // [B] Náraz (tlačítka)
                 if (naraz_vpredu()) {
                     posli_prikaz(CMD_STOP);
-                    Serial.println("[MOZEK] Prejezd PRERUSEN (Naraz!)");
+                    Serial.println("[MOZEK] Prejezd PRERUSEN (Naraz!) -> couvám 10cm");
+                    posli_prikaz(CMD_COUVEJ, 100);
                     krok = 4;
                     break;
                 }
@@ -1158,6 +1160,8 @@ void mozek_rozhoduj() {
     case STAV_VYKLADAM_PUKY:
         switch (krok) {
             case 0:  // Urči cestu
+                if (!rbcx_hotovo()) break; // Počkej na couvání
+                
                 if (!navigace.smer_doprava) {
                     Serial.println("[MOZEK] Vyklad: cesta A (z levé strany)");
                     mozek_otoc_o_180();
