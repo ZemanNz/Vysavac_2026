@@ -60,6 +60,8 @@ enum CmdID : uint8_t {
     CMD_ZAVRI_ZASOBNIKY = 0x07,  // Zavření zásobníků + reset počtu puků
     CMD_TOC_KONTINUALNE = 0x08,  // Zapne rotaci na místě a neukončí ji (čeká na CMD_STOP z ESP32)
     CMD_LIDAR_ERROR     = 0x09,  // Průběžná chyba úhlu z LiDARu (param = odchylka v desetinách stupně)
+    CMD_OTEVRI_SOUPER   = 0x0A,  // Otevření zásobníku soupeřových puků
+    CMD_ZAVRI_SOUPER    = 0x0B,  // Zavření zásobníku soupeřových puků
 };
 
 // Statusy (RBCX → ESP32) — MUSÍ odpovídat StatID v mozek.h!
@@ -82,6 +84,8 @@ const char* cmd_name(uint8_t cmd) {
         case CMD_ZAVRI_ZASOBNIKY: return "ZAVRI_ZASOBNIKY";
         case CMD_TOC_KONTINUALNE: return "TOC_KONTINUALNE";
         case CMD_LIDAR_ERROR:     return "LIDAR_ERROR";
+        case CMD_OTEVRI_SOUPER:   return "OTEVRI_SOUPER";
+        case CMD_ZAVRI_SOUPER:    return "ZAVRI_SOUPER";
         default:                  return "???";
     }
 }
@@ -208,7 +212,7 @@ void setup(){
     xTaskCreate(tridici_vlakno, "TridiciVlakno", 4096, NULL, 1, NULL);
 
     rkLedGreen(true);
-    srovnej_trididlo(); // Počáteční kalibrace třídiče
+    // srovnej_trididlo(); // Počáteční kalibrace třídiče - ODSTRANĚNO (nyní na tlačítko DOWN)
     Serial.println("=== RBCX READY ===");
 
     // =========================================================================
@@ -382,12 +386,38 @@ void setup(){
                         rkMotorsSetSpeed(0, 0);
                     }
                     break;
+                
+                case CMD_OTEVRI_SOUPER:
+                    aktualni_stav = STAT_BUSY;
+                    posli_stav();
+                    Serial.println(">> Otviram zasobnik soupere...");
+                    otevri_souper();
+                    delay(100);
+                    aktualni_stav = STAT_DONE;
+                    posli_stav();
+                    aktualni_stav = STAT_READY;
+                    break;
+
+                case CMD_ZAVRI_SOUPER:
+                    aktualni_stav = STAT_BUSY;
+                    posli_stav();
+                    Serial.println(">> Zaviram zasobnik soupere...");
+                    zavri_souper();
+                    delay(100);
+                    aktualni_stav = STAT_DONE;
+                    posli_stav();
+                    aktualni_stav = STAT_READY;
+                    break;
             }
         }
 
-        // Manuální ovládání pomocí tlačítek bylo dočasně deaktivováno, 
-        // protože dotyk bumperu o zeď vyvolával nechtěné chování.
-        
+        // Ruční srovnání třídiče na tlačítko DOWN - pouze pokud jsme READY (před startem)
+        if (aktualni_stav == STAT_READY && rb::Manager::get().buttons().down()) {
+            Serial.println(">> Ruční srovnání třídidla...");
+            srovnej_trididlo();
+            while(rb::Manager::get().buttons().down()) delay(10); // Čekej na uvolnění
+        }
+
         delay(20);
     }
 }

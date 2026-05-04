@@ -78,7 +78,9 @@ enum CmdID : uint8_t {
     CMD_VYLOZ           = 0x06,
     CMD_ZAVRI_ZASOBNIKY = 0x07,
     CMD_TOC_KONTINUALNE = 0x08,
-    CMD_LIDAR_ERROR     = 0x09
+    CMD_LIDAR_ERROR     = 0x09,
+    CMD_OTEVRI_SOUPER   = 0x0A,
+    CMD_ZAVRI_SOUPER    = 0x0B
 };
 
 // Statusy (RBCX → ESP32)
@@ -768,6 +770,18 @@ void mozek_rozhoduj() {
     // ──────────────────────────────────────────────────────
     case STAV_NAJEZD_NAHORU:
         switch (krok) {
+            case 10: // Čekání na zavření našeho zásobníku
+                if (rbcx_hotovo()) {
+                    posli_prikaz(CMD_OTEVRI_SOUPER);
+                    krok = 11;
+                }
+                break;
+            case 11: // Čekání na otevření soupeřova zásobníku
+                if (rbcx_hotovo()) {
+                    mozek_start_jizdy(60);
+                    krok = 0;
+                }
+                break;
             case 0: {
                 // [A] Plný zásobník
                 if (rbcx.pocet_puku >= PUKY_PLNY_ZASOBNIK) {
@@ -824,7 +838,13 @@ void mozek_rozhoduj() {
                 break;
             case 2:
                 if (rbcx_hotovo()) {
-                    delay(1000);
+                    posli_prikaz(CMD_ZAVRI_SOUPER);
+                    krok = 3;
+                }
+                break;
+            case 3:
+                if (rbcx_hotovo()) {
+                    delay(500); // Malá pauza pro jistotu po mechanice
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
                     Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
@@ -934,9 +954,19 @@ void mozek_rozhoduj() {
                     mozek_startovni_y_prejezdu = senzory.pozice_y;
                     mozek_startovni_lidar_prejezdu = senzory.dist_vpredu;
                     
-                    // Přejezd 25 cm pomocí enkodérů na RBCX
+                    if (navigace.smer_doprava) {
+                        posli_prikaz(CMD_OTEVRI_SOUPER);
+                        krok = 25; // Čekej na otevření
+                    } else {
+                        posli_prikaz(CMD_JED_SBIREJ, 25, 250); 
+                        cas_krok_ms = millis(); 
+                        krok = 3;
+                    }
+                }
+                break;
+            case 25: // Čekání na otevření zásobníku
+                if (rbcx_hotovo()) {
                     posli_prikaz(CMD_JED_SBIREJ, 25, 250); 
-                    
                     cas_krok_ms = millis(); 
                     krok = 3;
                 }
@@ -996,7 +1026,13 @@ void mozek_rozhoduj() {
                 break;
             case 5:  // Hotovo → nová lajna
                 if (rbcx_hotovo()) {
-                    delay(1000);
+                    posli_prikaz(CMD_ZAVRI_SOUPER);
+                    krok = 6;
+                }
+                break;
+            case 6:
+                if (rbcx_hotovo()) {
+                    delay(500);
                     dalsi_lajna();
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
@@ -1567,9 +1603,10 @@ void mozek_start_zapasu() {
         inicializuj_lajny();
         dynamicky_rezim = false;
         uz_vylozil = false;
-        Serial.println("[MOZEK] ═══ ZÁPAS ZAHÁJEN — NÁJEZD NAHORU ═══");
-        mozek_start_jizdy(60);
+        Serial.println("[MOZEK] ═══ ZÁPAS ZAHÁJEN — INICIALIZACE ZÁSOBNÍKŮ ═══");
+        posli_prikaz(CMD_ZAVRI_ZASOBNIKY);
         zmen_stav(STAV_NAJEZD_NAHORU);
+        krok = 10; // Krok pro úvodní zavření našeho zásobníku
     } else {
         // ═══ DRUHÝ A DALŠÍ START (dynamický režim) ═══
         dynamicky_rezim = true;
