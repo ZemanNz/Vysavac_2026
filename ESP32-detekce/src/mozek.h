@@ -794,7 +794,6 @@ void mozek_rozhoduj() {
                 if (souper_v_ceste()) {
                     Serial.printf("[MOZEK] Soupeř v cestě při nájezdu! → začínám lajny brzy\n");
                     posli_prikaz(CMD_STOP);
-                    mozek_otoc_o_90(true);
                     cas_krok_ms = millis();
                     krok = 1;
                     break;
@@ -1258,17 +1257,7 @@ void mozek_rozhoduj() {
                 break;
             case 21:
                 if (rbcx_hotovo()) {
-                    float h_err = senzory.heading;
-                    if (fabsf(h_err) > 0.5f) {
-                        Serial.println("[MOZEK] Srovnávám orientaci...");
-                        if (h_err > 0)
-                            mozek_otoc_relativne(-(h_err));
-                        else
-                            mozek_otoc_relativne(fabsf(h_err));
-                        krok = 22;
-                    } else {
-                        krok = 30;
-                    }
+                    krok = 30;
                 }
                 break;
             case 22:
@@ -1301,9 +1290,9 @@ void mozek_rozhoduj() {
 
             case 40:
                 if (naraz_vpredu()) {
-                    Serial.println("[MOZEK] Náraz při popojíždění u vykládky! Couvám 10cm...");
-                    posli_prikaz(CMD_COUVEJ, 100);
-                    krok = 45; // Počkáme v kroku 45 (souper_volno) na vyčištění cesty
+                    Serial.println("[MOZEK] Náraz při popojíždění u vykládky! Místo už není, končím vykládání.");
+                    posli_prikaz(CMD_STOP);
+                    krok = 50;
                     break;
                 }
                 if (souper_v_ceste()) {
