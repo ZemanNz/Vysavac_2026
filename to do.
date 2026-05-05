@@ -85,12 +85,16 @@ problemy:
 - vyhazovani souperovych puku..... kdyz jedeme z leva do prava aby jsme to znovu nebrali...--- vyhazoval bych to u prejizdeni line... -- done
 
 - SOUPER: 
+- snazil jsem se udelat chytre vyhybani, ale nefachalo to.... je poteba to vymyslet ---> idealni by bylo kdyba robot proste najel az pod robota teda videt kdy uz jsem ho prejeli a (pomoci ladaru a laserovych senzoru...) --> a pak se otocit zpet a projet to pod nim....
+- i kdyz je obcas hezky pred nim tak do mej obcas narazi....
+
+
 
 - DRUHA JIZDA:
 - musi se startovat sama.....
 
 - VYKLADANI:
-- obcas se to domrda..... zvlast po tlacitkach ci souper....
+- obcas se to domrda..... zvlast po tlacitkach ci souper....   --->> uzto moc nedela... jeste sledovat
 
 
 - NOUZOVY NAVRAT:
