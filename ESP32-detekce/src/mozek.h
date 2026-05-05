@@ -790,18 +790,18 @@ void mozek_rozhoduj() {
                     zmen_stav(STAV_VRACIM_SE_DOMU);
                     break;
                 }
-                // [B] Soupeř v cestě
+                // [B] Náraz vpředu
+                if (naraz_vpredu()) {
+                    Serial.println("[MOZEK] Náraz vpředu u nájezdu → couvám a pak doleva");
+                    posli_prikaz(CMD_COUVEJ, 100); // Couvni 10cm
+                    krok = 1;
+                    break;
+                }
+                // [C] Soupeř v cestě
                 if (souper_v_ceste()) {
                     Serial.printf("[MOZEK] Soupeř v cestě při nájezdu! → začínám lajny brzy\n");
                     posli_prikaz(CMD_STOP);
                     cas_krok_ms = millis();
-                    krok = 1;
-                    break;
-                }
-                // [C] Náraz vpředu
-                if (naraz_vpredu()) {
-                    Serial.println("[MOZEK] Náraz vpředu u nájezdu → couvám a pak doleva");
-                    posli_prikaz(CMD_COUVEJ, 100); // Couvni 10cm
                     krok = 1;
                     break;
                 }
@@ -864,15 +864,7 @@ void mozek_rozhoduj() {
             zmen_stav(STAV_VRACIM_SE_DOMU);
             break;
         }
-        // [B] Soupeř v cestě
-        if (souper_v_ceste()) {
-            Serial.printf("[MOZEK] Soupeř v cestě! dist=%.0f → VYHÝBÁM SE\n", senzory.souper_vzdalenost);
-            posli_prikaz(CMD_STOP);
-            zmen_stav(STAV_VYHYBAM_SE_SOUPERI);
-            break;
-        }
-
-        // [C] Náraz vpředu (tlačítka) → couvni a přejeď na další lajnu
+        // [B] Náraz vpředu (tlačítka) → couvni a přejeď na další lajnu
         if (naraz_vpredu()) {
             Serial.println("[MOZEK] Náraz vpředu → couvám 10cm...");
             posli_prikaz(CMD_COUVEJ, 100);
@@ -883,6 +875,14 @@ void mozek_rozhoduj() {
             } else {
                 zmen_stav(STAV_VYKLADAM_PUKY);
             }
+            break;
+        }
+
+        // [C] Soupeř v cestě
+        if (souper_v_ceste()) {
+            Serial.printf("[MOZEK] Soupeř v cestě! dist=%.0f → VYHÝBÁM SE\n", senzory.souper_vzdalenost);
+            posli_prikaz(CMD_STOP);
+            zmen_stav(STAV_VYHYBAM_SE_SOUPERI);
             break;
         }
 
