@@ -40,6 +40,8 @@
 #define VZDALENOST_SOUPERE_STOP  500.0f  // mm — soupeř přímo v cestě → stop
 #define VZDALENOST_SOUPERE_VOLNO 650.0f  // mm — soupeř pryč → rozjezd (+15 cm rezerva)
 #define UHEL_SOUPERE_VPRED        45.0f  // ° — soupeř v tomto kuželu = "v cestě"
+#define SOUPER_PRAH_LIDAR_MM    700.0f   // LiDAR boční: < tohle = soupeř tam je
+#define SOUPER_PRAH_UZ_MM       400      // UZ zadní: < tohle = soupeř tam je
 
 // Limity puků
 #define PUKY_PLNY_ZASOBNIK  10   // kolik puků → jedem domů
@@ -222,6 +224,14 @@ static StavRbcx       rbcx;
 static StavRobota     stav = STAV_CEKAM_NA_START;
 static StavRobota     stav_po_vyhybani = STAV_JEDU_LAJNU;
 static unsigned long  cas_startu = 0;    // millis() kdy zápas začal (0 = nezačal)
+
+// Vyhýbání soupeři — 2-fázová detekce (LiDAR → UZ)
+static char  vyh_strana = 'R';          // 'R' = soupeř vpravo, 'L' = soupeř vlevo
+static bool  vyh_souper_viden = false;   // viděli jsme soupeře na boku?
+static int   vyh_lidar_volno = 0;        // kolikrát LiDAR řekl "volno" za sebou
+static bool  vyh_lidar_ok = false;       // LiDAR 2× potvrdil
+static int   vyh_uz_volno = 0;           // kolikrát UZ řekl "volno" za sebou
+static float vyh_posledni_bok = -1.0f;   // pro detekci nových LiDAR dat
 
 // Mapa pokrytí
 static bool mapa_pokryti[POCET_BUNEK_X][POCET_BUNEK_Y];
@@ -1057,95 +1067,127 @@ void mozek_rozhoduj() {
         break;
 
     // ──────────────────────────────────────────────────────
-    //  VYHÝBÁM SE SOUPEŘI — podjíždíme celého soupeře najednou
+    //  VYHÝBÁM SE SOUPEŘI — 2-fázová detekce (LiDAR → UZ)
     //
     //  Logika:
-    //    krok 0: Otoč se dolů (90° od lajny)
-    //    krok 1: Jeď dolů, dokud soupeř ZMIZÍ ze směru lajny
-    //    krok 2: Zastaveno, otočit zpět na lajnu
-    //    krok 3: Pokračuj v jízdě po lajně
-    //    krok 10: Alternativní únik (nemám místo / soupeř pod námi)
+    //    krok 0: Otoč se dolů, urči stranu soupeře
+    //    krok 1: Jeď kolem, LiDAR 2× volno → UZ 2× volno
+    //    krok 2: Dojezd 100mm rezervy
+    //    krok 3: Otočit zpět na lajnu
+    //    krok 4: Pokračuj v jízdě
+    //    krok 10: Alternativní únik
     // ──────────────────────────────────────────────────────
     case STAV_VYHYBAM_SE_SOUPERI:
         switch (krok) {
             case 0: {
+                // Určíme stranu: robot jede doprava → soupeř je vpravo → otočíme doleva (dolů)
+                // Robot jede doleva → soupeř je vlevo → otočíme doprava (dolů)
+                // Vždy se snažíme jet DOLŮ (směrem k naší zóně)
                 bool ma_misto_dole = (senzory.pozice_y > BEZPECNA_VZDALENOST_ZDIE_Y + SIRKA_ROBOTA_MM);
                 if (!ma_misto_dole) {
-                    // U spodní stěny — nemůžeme dolů → otočíme se a jedeme zpět
                     Serial.println("[MOZEK] Soupeř blokuje a nemám místo dolů! Otáčím zpět.");
                     mozek_otoc_o_180();
                     navigace.smer_doprava = !navigace.smer_doprava;
                     krok = 10;
                     break;
                 }
-                // Zkontroluj LiDARem dolů — jestli tam soupeř taky nestojí
-                if (souper_v_smeru(180.0f, 500.0f, 45.0f)) {
-                    Serial.println("[MOZEK] Lidar vidí soupeře pod námi! Vracím se starou lajnou.");
-                    navigace.smer_doprava = !navigace.smer_doprava;
-                    mozek_otoc_o_180();
-                    krok = 10;
-                    break;
+                
+                // Určíme stranu soupeře
+                if (navigace.smer_doprava) {
+                    vyh_strana = 'R';    // jeli jsme doprava → soupeř je vpravo
+                    mozek_otoc_o_90(false); // otočíme doleva (dolů)
+                } else {
+                    vyh_strana = 'L';    // jeli jsme doleva → soupeř je vlevo
+                    mozek_otoc_o_90(true);  // otočíme doprava (dolů)
                 }
-                // Natočení dolů (pryč od soupeře)
-                if (navigace.smer_doprava)
-                    mozek_otoc_o_90(false);
-                else
-                    mozek_otoc_o_90(true);
+                
+                Serial.printf("[MOZEK] Vyhýbání: soupeř %s, sleduju %s stranu\n",
+                    vyh_strana == 'R' ? "VPRAVO" : "VLEVO",
+                    vyh_strana == 'R' ? "pravou" : "levou");
+                
+                vyh_souper_viden = false;
+                vyh_lidar_volno = 0;
+                vyh_lidar_ok = false;
+                vyh_uz_volno = 0;
+                vyh_posledni_bok = -1.0f;
+                mozek_start_jizdy(25);  // pomalu kolem soupeře
+                cas_krok_ms = millis();
                 krok = 1;
                 break;
             }
-            case 1: // Jeď dolů — dokud soupeř nezmizí ze směru lajny
-                if (rbcx_hotovo()) {
-                    mozek_start_jizdy(40);
-                    cas_krok_ms = millis();
-                    krok = 2;
+            
+            case 1: { // Jedu kolem — 2-fázová detekce (LiDAR → UZ)
+                float bok_lidar = (vyh_strana == 'R') ? nv_dist_right : nv_dist_left;
+                uint16_t bok_uz = (vyh_strana == 'R') ? rbcx.uz3_mm : rbcx.uz1_mm;
+                unsigned long cas_jizdy = millis() - cas_krok_ms;
+                
+                // Kontroluj jen při nové LiDAR hodnotě
+                if (bok_lidar != vyh_posledni_bok) {
+                    vyh_posledni_bok = bok_lidar;
+                    
+                    bool lidar_vidi = (bok_lidar < SOUPER_PRAH_LIDAR_MM);
+                    bool uz_vidi = (bok_uz > 0 && bok_uz < SOUPER_PRAH_UZ_MM);
+                    
+                    Serial.printf("[MOZEK] LiDAR(%c):%4dmm(%s) UZ%c:%4dmm(%s) %s\n",
+                        vyh_strana, (int)bok_lidar, lidar_vidi ? "OBJ" : " - ",
+                        vyh_strana == 'R' ? '3' : '1', bok_uz, uz_vidi ? "OBJ" : " - ",
+                        vyh_lidar_ok ? "[čekám UZ]" : "[čekám LiDAR]");
+                    
+                    // Nejdřív musíme soupeře VIDĚT
+                    if (!vyh_souper_viden && (lidar_vidi || uz_vidi)) {
+                        vyh_souper_viden = true;
+                        Serial.printf("[MOZEK] *** Soupeř detekován na %s straně! ***\n",
+                            vyh_strana == 'R' ? "pravé" : "levé");
+                    }
+                    
+                    if (vyh_souper_viden) {
+                        // FÁZE 1: LiDAR 2× volno
+                        if (!vyh_lidar_ok) {
+                            if (!lidar_vidi) {
+                                vyh_lidar_volno++;
+                                Serial.printf("[MOZEK]   → LiDAR volno %d/2\n", vyh_lidar_volno);
+                            } else {
+                                vyh_lidar_volno = 0;
+                            }
+                            if (vyh_lidar_volno >= 2) {
+                                vyh_lidar_ok = true;
+                                Serial.println("[MOZEK] *** LiDAR potvrzeno → sleduju UZ ***");
+                            }
+                        }
+                        // FÁZE 2: UZ 2× volno
+                        if (vyh_lidar_ok) {
+                            if (!uz_vidi) {
+                                vyh_uz_volno++;
+                                Serial.printf("[MOZEK]   → UZ volno %d/2\n", vyh_uz_volno);
+                            } else {
+                                vyh_uz_volno = 0;
+                            }
+                            if (vyh_uz_volno >= 2) {
+                                Serial.println("[MOZEK] *** SOUPEŘ PŘEJET! *** Popojíždím 100mm...");
+                                posli_prikaz(CMD_JED_SBIREJ, 25, 100); // 100mm rezerva
+                                krok = 2;
+                                break;
+                            }
+                        }
+                    }
                 }
-                break;
-            case 2: {
-                // Směr lajny (kam robot pojede PO otočení zpět)
-                float tar_h = navigace.smer_doprava ? 90.0f : -90.0f;
-                unsigned long cas_dolu_v = millis() - cas_krok_ms;
-
-                // [A] Soupeř přímo v cestě (i dolů) → nouzový únik zpět
-                if (souper_v_ceste()) {
-                    posli_prikaz(CMD_STOP);
-                    Serial.println("[MOZEK] Soupeř i dolů! Otáčím zpět na lajnu opačně.");
-                    if (navigace.smer_doprava)
-                        mozek_otoc_o_90(true);
-                    else
-                        mozek_otoc_o_90(false);
-                    navigace.smer_doprava = !navigace.smer_doprava;
-                    krok = 10;
-                    break;
-                }
-
-                // [B] Náraz vpředu (zeď dole)
+                
+                // Náraz vpředu
                 if (naraz_vpredu()) {
                     posli_prikaz(CMD_COUVEJ, 100);
-                    Serial.println("[MOZEK] Náraz dolů při vyhýbání! Couvám a otáčím zpět.");
+                    Serial.println("[MOZEK] Náraz při vyhýbání! Couvám a otáčím zpět.");
                     krok = 3;
                     break;
                 }
-
-                // [C] Blízko spodní zdi
+                // Blízko spodní zdi
                 if (senzory.dist_vpredu <= 300.0f || senzory.pozice_y <= BEZPECNA_VZDALENOST_DOMOV_Y) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Blízko zdi při vyhýbání → otáčím zpět.");
                     krok = 3;
                     break;
                 }
-
-                // [D] Hlavní podmínka: soupeř ZMIZL ze směru lajny → hotovo
-                //     Čekáme aspoň 500ms, aby LiDAR měl čas aktualizovat
-                if (cas_dolu_v > 500 && !souper_v_smeru(tar_h, VZDALENOST_SOUPERE_VOLNO, UHEL_SOUPERE_VPRED)) {
-                    posli_prikaz(CMD_STOP);
-                    Serial.printf("[MOZEK] Soupeř podjet! (jeli jsme %.1fs dolů)\\n", cas_dolu_v / 1000.0f);
-                    krok = 3;
-                    break;
-                }
-
-                // [E] Pojistka: max 8 sekund jízdy dolů
-                if (cas_dolu_v > 8000) {
+                // Pojistka: max 8s
+                if (cas_jizdy > 8000) {
                     posli_prikaz(CMD_STOP);
                     Serial.println("[MOZEK] Timeout vyhýbání (8s) → otáčím zpět.");
                     krok = 3;
@@ -1153,7 +1195,15 @@ void mozek_rozhoduj() {
                 }
                 break;
             }
-            case 3: // Otoč se zpět na lajnu (ve STEJNÉM směru jako před vyhýbáním)
+            
+            case 2: // Dojíždím 100mm rezervu
+                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Rezerva ujeta → otáčím zpět na lajnu.");
+                    krok = 3;
+                }
+                break;
+            
+            case 3: // Otoč zpět na lajnu (ve STEJNÉM směru jako před vyhýbáním)
                 if (rbcx_hotovo()) {
                     if (navigace.smer_doprava)
                         mozek_otoc_o_90(true);   // zpět doprava
@@ -1166,7 +1216,7 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
-                    Serial.printf("[MOZEK] Pokračuji po lajně %s po vyhnutí\\n", navigace.smer_doprava ? "→" : "←");
+                    Serial.printf("[MOZEK] Pokračuji po lajně %s po vyhnutí\n", navigace.smer_doprava ? "→" : "←");
                     zmen_stav(stav_po_vyhybani);
                 }
                 break;

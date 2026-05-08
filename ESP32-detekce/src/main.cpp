@@ -12,9 +12,9 @@
 //    USE_TEST    1  →  test pohybu
 // ============================================================
 #define USE_VIZ     0
-#define USE_MOZEK   0
+#define USE_MOZEK   1
 #define USE_TEST    0
-#define USE_SOUPER  1
+#define USE_SOUPER  0
 #define USE_SENZORY 0  // Test senzorů (lasery + ultrazvuky, bez LiDARu)
 
 // --- Senzory (samostatný režim, nepotřebuje LiDAR ani RBCX) ---
