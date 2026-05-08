@@ -39,13 +39,15 @@ typedef struct __attribute__((packed)) {
     int16_t param2; // Přidáno pro cílovou vzdálenost
 } EspCommand;
 
-// --- RBCX → ESP32 (7 bajtů) ---
+// --- RBCX → ESP32 (11 bajtů) ---
 typedef struct __attribute__((packed)) {
     uint8_t status;       // STAT_READY / STAT_BUSY / STAT_DONE
     uint8_t cmd_id;       // Potvrzení: k jakému příkazu se stav váže
     uint8_t buttons;      // Bit 0=UP, 1=DOWN, 2=LEFT, 3=RIGHT
     int16_t pocet_puku;   // Počet nasbíraných puků naší barvy
     int16_t param;        // Doplňkový parametr (záleží na kontextu)
+    uint16_t uz1_mm;      // Ultrazvuk 1 (levý zadní) v mm
+    uint16_t uz3_mm;      // Ultrazvuk 3 (pravý zadní) v mm
 } RbcxStatus;
 
 // Příkazy (ESP32 → RBCX) — MUSÍ odpovídat CmdID v mozek.h!
@@ -108,6 +110,10 @@ volatile int16_t aktivni_param2 = 0;
 volatile bool    novy_prikaz    = false;
 volatile uint8_t aktualni_stav  = STAT_READY;  // Co právě děláme
 
+// Ultrazvuky — měřeny periodicky v UART vlákně
+volatile uint16_t g_uz1_mm = 0;  // Ultrazvuk 1 (levý zadní)
+volatile uint16_t g_uz3_mm = 0;  // Ultrazvuk 3 (pravý zadní)
+
 // =============================================================================
 //  SESTAVENÍ STATUSU (přečte tlačítka + puky + stav)
 // =============================================================================
@@ -130,6 +136,8 @@ RbcxStatus sestav_stav(int16_t extra_param = 0) {
     
     s.pocet_puku = pocet_nasich_puku;
     s.param = extra_param;
+    s.uz1_mm = g_uz1_mm;
+    s.uz3_mm = g_uz3_mm;
     
     return s;
 }
@@ -171,6 +179,9 @@ void uart_vlakno(void *pvParameters) {
         // --- Periodické odesílání stavu přes UART (každých 200ms) ---
         if (millis() - posledni_stav > 200) {
             posledni_stav = millis();
+            // Měření ultrazvuků (každý ~30ms, ale děláme to jen při statusu)
+            g_uz1_mm = rkUltraMeasure(1);
+            g_uz3_mm = rkUltraMeasure(3);
             posli_stav();
         }
 

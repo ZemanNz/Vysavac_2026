@@ -59,13 +59,15 @@ typedef struct __attribute__((packed)) {
     int16_t param2; // Přidáno pro cílovou vzdálenost (mm)
 } EspCommand;
 
-// RBCX → ESP32 (7 bajtů)
+// RBCX → ESP32 (11 bajtů)
 typedef struct __attribute__((packed)) {
     uint8_t status;
     uint8_t cmd_id;    // Přidáno: potvrzení odeslaného příkazu
     uint8_t buttons;
     int16_t pocet_puku;
     int16_t param;
+    uint16_t uz1_mm;   // Ultrazvuk 1 (levý zadní) v mm
+    uint16_t uz3_mm;   // Ultrazvuk 3 (pravý zadní) v mm
 } RbcxStatus;
 
 // Příkazy (ESP32 → RBCX)
@@ -131,6 +133,8 @@ struct StavRbcx {
     bool    tlacitko_vlevo;
     bool    tlacitko_vpravo;
     int     pocet_puku;
+    uint16_t uz1_mm;           // Ultrazvuk 1 (levý zadní) v mm
+    uint16_t uz3_mm;           // Ultrazvuk 3 (pravý zadní) v mm
     unsigned long posledni_prijem;  // millis()
 };
 
@@ -305,6 +309,8 @@ bool prijmi_stav_rbcx() {
                     rbcx.tlacitko_vlevo      = (st.buttons >> 2) & 1;
                     rbcx.tlacitko_vpravo     = (st.buttons >> 3) & 1;
                     rbcx.pocet_puku          = st.pocet_puku;
+                    rbcx.uz1_mm              = st.uz1_mm;
+                    rbcx.uz3_mm              = st.uz3_mm;
                     rbcx.posledni_prijem     = millis();
                     uart_rx_stav = RX_CEKAM_SYNC0;
                     return true;

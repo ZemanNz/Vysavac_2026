@@ -3,7 +3,7 @@
 
 // Definice pinu
 const int TRIG_PIN = 5;
-const int ECHO_PINS[3] = {18, 19, 23};
+const int ECHO_PINS[3] = {18, 19, 4};  // U1=18, U2=19, U3=4 (přesunuto z 23)
 
 void init_ultrazvuky() {
     pinMode(TRIG_PIN, OUTPUT);

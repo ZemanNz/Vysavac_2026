@@ -3,28 +3,34 @@
 // =============================================================================
 //  souper.h — Test vyhýbání soupeři
 //
-//  UP → jeď → [soupeř!] → otoč DOLEVA → jeď a sleduj PRAVOU stranu →
-//  [soupeř zmizel z pravé strany!] → popojeď 200mm → otoč DOPRAVA → jeď dál
+//  Senzory pro detekci přejetí soupeře:
+//    - LiDAR (nv_dist_right) — vpředu robota, ±3° kužel
+//    - Ultrazvuk U3 (rbcx.uz3_mm) — vzadu robota, z RBCX desky
+//
+//  Logika: LiDAR 2× volno → sleduj už jen UZ → UZ 2× volno → přejet!
 // =============================================================================
 
 #define SOUPER_RYCHLOST_LAJNA   60
 #define SOUPER_RYCHLOST_VYHYBKA 25     // pomalé přejíždění
 #define SOUPER_REZERVA_MM       150    // kolik mm ještě popojet po přejetí soupeře
-#define SOUPER_PRAH_VOLNO_MM    700.0f // pravá strana > tohle = soupeř tam není
+#define SOUPER_PRAH_LIDAR_MM    700.0f // LiDAR: pravá > tohle = soupeř tam není
+#define SOUPER_PRAH_UZ_MM       400    // Ultrazvuk: > tohle = soupeř tam není
 
 enum SouperTestStav : uint8_t {
     ST_CEKAM,
     ST_JEDU_LAJNU,
-    ST_VYHYBAM_JEDU,    // jedu dolů, sleduju pravou stranu
-    ST_VYHYBAM_DOJIZDIM,// soupeř zmizel, jedu ještě 200mm
+    ST_VYHYBAM_JEDU,    // jedu kolem, sleduju LiDAR + UZ
+    ST_VYHYBAM_DOJIZDIM,// soupeř zmizel, jedu ještě 150mm
     ST_HOTOVO,
 };
 
 static SouperTestStav st_stav = ST_CEKAM;
 static int st_krok = 0;
 static bool st_souper_byl_viden = false;  // viděli jsme soupeře na pravé straně?
-static int  st_volno_pocet = 0;           // kolikrát za sebou byla pravá strana volná
-static float st_posledni_prava = -1.0f;   // poslední známá hodnota (pro detekci nových dat)
+static int  st_lidar_volno_pocet = 0;    // kolikrát LiDAR řekl "volno" za sebou
+static bool st_lidar_potvrzeno = false;  // LiDAR 2× potvrdil → díváme se jen na UZ
+static int  st_uz_volno_pocet = 0;       // kolikrát UZ řekl "volno" za sebou
+static float st_posledni_prava = -1.0f;  // pro detekci nových LiDAR dat
 
 const char* st_jmeno(SouperTestStav s) {
     switch(s) {
@@ -52,6 +58,9 @@ void souper_init() {
     st_stav = ST_CEKAM;
     st_krok = 0;
     st_souper_byl_viden = false;
+    st_lidar_volno_pocet = 0;
+    st_lidar_potvrzeno = false;
+    st_uz_volno_pocet = 0;
     Serial.println("[SOUPER] === READY === čekám na UP...");
 }
 
@@ -73,7 +82,15 @@ void souper_rozhoduj() {
     case ST_CEKAM: {
         static bool btn_pred = false;
         static unsigned long uvolneno = 0;
+        static unsigned long posledni_debug = 0;
         bool btn = rbcx.tlacitko_vpredu_up;
+
+        // Vypisuj senzory každých 500ms
+        if (millis() - posledni_debug > 500) {
+            posledni_debug = millis();
+            Serial.printf("[SENZORY] UZ1=%4dmm  UZ3=%4dmm (z RBCX) | LiDAR R=%4dmm\n",
+                rbcx.uz1_mm, rbcx.uz3_mm, (int)nv_dist_right);
+        }
 
         if (!btn && btn_pred && rbcx.pripojeno) {
             uvolneno = millis();
@@ -102,7 +119,10 @@ void souper_rozhoduj() {
             Serial.println("[SOUPER] Otočeno. Jedu kolem soupeře, sleduju PRAVOU stranu...");
             
             st_souper_byl_viden = false;
-            st_volno_pocet = 0;
+            st_lidar_volno_pocet = 0;
+            st_lidar_potvrzeno = false;
+            st_uz_volno_pocet = 0;
+            st_posledni_prava = -1.0f;
             mozek_start_jizdy(SOUPER_RYCHLOST_VYHYBKA);
             st_zmen(ST_VYHYBAM_JEDU);
             break;
@@ -127,40 +147,60 @@ void souper_rozhoduj() {
         }
         break;
 
-    // ─── JEDU KOLEM SOUPEŘE — sleduju pravou stranu ───
+    // ─── JEDU KOLEM SOUPEŘE — 2-fázová detekce (LiDAR → UZ) ───
     case ST_VYHYBAM_JEDU: {
-        float prava = nv_dist_right;
+        float prava_lidar = nv_dist_right;
+        uint16_t prava_uz = rbcx.uz3_mm;
         
-        // Kontroluj JEN když přišla nová hodnota z LiDÁRu (jiná než minule)
-        if (prava != st_posledni_prava) {
-            st_posledni_prava = prava;
+        // Kontroluj jen když přišla nová hodnota z LiDARu
+        if (prava_lidar != st_posledni_prava) {
+            st_posledni_prava = prava_lidar;
             
-            // Vypiš novou hodnotu
-            Serial.printf("[SOUPER] Pravá: %4dmm  %s\n",
-                (int)prava,
-                (prava < SOUPER_PRAH_VOLNO_MM) ? "<<< SOUPEŘ >>>" : "--- volno ---");
+            bool lidar_vidi = (prava_lidar < SOUPER_PRAH_LIDAR_MM);
+            bool uz_vidi = (prava_uz > 0 && prava_uz < SOUPER_PRAH_UZ_MM);
             
-            // Nejdřív musíme soupeře VIDĚT na pravé straně
-            if (!st_souper_byl_viden && prava < SOUPER_PRAH_VOLNO_MM) {
+            // Výpis stavu
+            Serial.printf("[SOUPER] LiDAR:%4dmm(%s) UZ3:%4dmm(%s) %s\n",
+                (int)prava_lidar, lidar_vidi ? "OBJ" : " - ",
+                prava_uz,         uz_vidi    ? "OBJ" : " - ",
+                st_lidar_potvrzeno ? "[čekám na UZ]" : "[čekám na LiDAR]");
+            
+            // 1) Nejdřív musíme soupeře VIDĚT (LiDAR nebo UZ)
+            if (!st_souper_byl_viden && (lidar_vidi || uz_vidi)) {
                 st_souper_byl_viden = true;
-                Serial.printf("[SOUPER] *** Soupeř detekován na pravé straně! (%dmm) ***\n", (int)prava);
+                Serial.println("[SOUPER] *** Soupeř detekován na pravé straně! ***");
             }
             
-            // Pak čekáme, až ZMIZÍ — 2× za sebou s NOVOU hodnotou
-            if (st_souper_byl_viden) {
-                if (prava >= SOUPER_PRAH_VOLNO_MM) {
-                    st_volno_pocet++;
-                    Serial.printf("[SOUPER]   → volno %d/2\n", st_volno_pocet);
+            if (!st_souper_byl_viden) break;
+            
+            // 2) FÁZE 1: Čekáme na LiDAR 2× volno
+            if (!st_lidar_potvrzeno) {
+                if (!lidar_vidi) {
+                    st_lidar_volno_pocet++;
+                    Serial.printf("[SOUPER]   → LiDAR volno %d/2\n", st_lidar_volno_pocet);
                 } else {
-                    if (st_volno_pocet > 0) {
-                        Serial.printf("[SOUPER]   → reset (zase soupeř)\n");
-                    }
-                    st_volno_pocet = 0;
+                    if (st_lidar_volno_pocet > 0) Serial.println("[SOUPER]   → LiDAR reset");
+                    st_lidar_volno_pocet = 0;
                 }
                 
-                if (st_volno_pocet >= 2) {
-                    Serial.printf("[SOUPER] *** SOUPEŘ PŘEJET! *** Pravá: %dmm > práh %dmm (2× potvrzeno)\n",
-                        (int)prava, (int)SOUPER_PRAH_VOLNO_MM);
+                if (st_lidar_volno_pocet >= 2) {
+                    st_lidar_potvrzeno = true;
+                    Serial.println("[SOUPER] *** LiDAR potvrzeno → sleduju už jen UZ3 ***");
+                }
+            }
+            
+            // 3) FÁZE 2: LiDAR hotovo → čekáme na UZ 2× volno
+            if (st_lidar_potvrzeno) {
+                if (!uz_vidi) {
+                    st_uz_volno_pocet++;
+                    Serial.printf("[SOUPER]   → UZ3 volno %d/2\n", st_uz_volno_pocet);
+                } else {
+                    if (st_uz_volno_pocet > 0) Serial.println("[SOUPER]   → UZ3 reset");
+                    st_uz_volno_pocet = 0;
+                }
+                
+                if (st_uz_volno_pocet >= 2) {
+                    Serial.println("[SOUPER] *** SOUPEŘ PŘEJET! *** (LiDAR + UZ3 potvrzeno)");
                     posli_prikaz(CMD_STOP);
                     Serial.println("[SOUPER] Zastavuji... čekám 5 sekund.");
                     delay(5000);
@@ -195,7 +235,7 @@ void souper_rozhoduj() {
         break;
     }
 
-    // ─── DOJÍŽDÍM 200mm PO PŘEJETÍ SOUPEŘE ───
+    // ─── DOJÍŽDÍM 150mm PO PŘEJETÍ SOUPEŘE ───
     case ST_VYHYBAM_DOJIZDIM:
         if (rbcx_hotovo()) {
             Serial.println("[SOUPER] Rezerva ujeta → otáčím DOPRAVA");
