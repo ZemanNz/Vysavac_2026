@@ -22,6 +22,7 @@
 #define UART_RBCX_BAUD  115200
 
 // Časování
+#define ZAPNOUT_NOUZOVY_NAVRAT false   // Změnit na true pro zapnutí hlídání času (nouzový návrat)
 #define DELKA_ZAPASU_MS       180000   // 180 sekund (3 minuty)
 #define CAS_NOUZOVEHO_NAVRATU 10000    // posledních 10s → nouzový návrat
 
@@ -727,7 +728,7 @@ void mozek_rozhoduj() {
     // ╔══════════════════════════════════════════════════════════╗
     // ║  NOUZOVÝ NÁVRAT — má nejvyšší prioritu, přeruší cokoliv ║
     // ╚══════════════════════════════════════════════════════════╝
-    if (cas_startu > 0 && zbyva_ms < CAS_NOUZOVEHO_NAVRATU
+    if (ZAPNOUT_NOUZOVY_NAVRAT && cas_startu > 0 && zbyva_ms < CAS_NOUZOVEHO_NAVRATU
         && stav != STAV_NOUZOVY_NAVRAT && stav != STAV_VYKLADAM_PUKY
         && !uz_vylozil) {
         Serial.println("[MOZEK] !!! ČAS KONČÍ — NOUZOVÝ NÁVRAT !!!");
