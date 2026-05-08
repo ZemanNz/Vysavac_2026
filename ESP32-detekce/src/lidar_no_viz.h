@@ -68,6 +68,14 @@ static float nv_dist_front = 9999.0f;
 static float nv_acc_front_dist = 0.0f;
 static int nv_acc_front_count = 0;
 
+// Boční vzdálenosti (levá a pravá strana robota, ±15° kužely)
+static float nv_dist_left  = 9999.0f;
+static float nv_dist_right = 9999.0f;
+static float nv_acc_left_dist = 0.0f;
+static int   nv_acc_left_count = 0;
+static float nv_acc_right_dist = 0.0f;
+static int   nv_acc_right_count = 0;
+
 // ---------- Pomocné funkce ----------
 
 // Lokální → globální transformace
@@ -92,17 +100,27 @@ static void nv_processPacket() {
         while (a >= 360.0f) a -= 360.0f;
         while (a < 0.0f) a += 360.0f;
 
-        // --- PŘÍMÝ SBĚR PŘEDNÍHO KUŽELU Z RAW DAT ---
+        // --- PŘÍMÝ SBĚR KUŽELŮ Z RAW DAT ---
         // Převedeme úhel do -180..+180 pro snadnější podmínku
         float a_front = a;
         if (a_front > 180.0f) a_front -= 360.0f;
         
-        // Přední 30° kužel (střed na 90°, tj. +-15 stupňů)
-        // V lokálních souřadnicích je 90° směr vpřed (+Y)
-        if (fabsf(a_front - 90.0f) <= 15.0f) {
-            if (d > 40 && d < 4000) {
+        if (d > 40 && d < 4000) {
+            // Přední 30° kužel (střed na 90°, tj. +-15 stupňů)
+            // V lokálních souřadnicích je 90° směr vpřed (+Y)
+            if (fabsf(a_front - 90.0f) <= 15.0f) {
                 nv_acc_front_dist += d;
                 nv_acc_front_count++;
+            }
+            // Levý 6° kužel (střed na 180°, tj. levá strana robota)
+            if (fabsf(a_front - 180.0f) <= 3.0f || fabsf(a_front + 180.0f) <= 3.0f) {
+                nv_acc_left_dist += d;
+                nv_acc_left_count++;
+            }
+            // Pravý 6° kužel (střed na 0°, tj. pravá strana robota)
+            if (fabsf(a_front) <= 3.0f) {
+                nv_acc_right_dist += d;
+                nv_acc_right_count++;
             }
         }
         // --------------------------------------------
@@ -332,20 +350,36 @@ void loop_lidar_nv() {
             rel_angle >= 0 ? 'R' : 'L');
     }
 
-    // ===================== Detekce vzdálenosti vpředu (pro bezpečné zastavení) =====================
+    // ===================== Detekce vzdáleností (vpřed, vlevo, vpravo) =====================
     if (nv_acc_front_count > 0) {
-        // Průměrná hodnota filtruje náhodné "nuly" a vyžaduje shodu více paprsků
-        // Odečítáme NV_LIDAR_FROM_FRONT, aby nv_dist_front byla vzdálenost OD NÁRAZNÍKU
         nv_dist_front = (nv_acc_front_dist / nv_acc_front_count) - NV_LIDAR_FROM_FRONT;
         if (nv_dist_front < 0) nv_dist_front = 0; 
     } else {
         nv_dist_front = 9999.0f;
     }
+    if (nv_acc_left_count > 0) {
+        nv_dist_left = (nv_acc_left_dist / nv_acc_left_count) - (NV_ROBOT_WIDTH_MM / 2.0f);
+        if (nv_dist_left < 0) nv_dist_left = 0;
+    } else {
+        nv_dist_left = 9999.0f;
+    }
+    if (nv_acc_right_count > 0) {
+        nv_dist_right = (nv_acc_right_dist / nv_acc_right_count) - (NV_ROBOT_WIDTH_MM / 2.0f);
+        if (nv_dist_right < 0) nv_dist_right = 0;
+    } else {
+        nv_dist_right = 9999.0f;
+    }
     
-    Serial.printf(" | FRONT %4dmm (bumper, pts: %2d)\n", (int)nv_dist_front, nv_acc_front_count);
+    Serial.printf(" | FRONT %4dmm (pts:%2d) | SIDE L:%4dmm R:%4dmm\n",
+        (int)nv_dist_front, nv_acc_front_count,
+        (int)nv_dist_left, (int)nv_dist_right);
 
     // Reset pro další otočku
     nv_acc_front_dist = 0.0f;
     nv_acc_front_count = 0;
+    nv_acc_left_dist = 0.0f;
+    nv_acc_left_count = 0;
+    nv_acc_right_dist = 0.0f;
+    nv_acc_right_count = 0;
     nv_n_pts = 0;
 }

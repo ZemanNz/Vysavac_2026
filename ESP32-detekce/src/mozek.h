@@ -1051,7 +1051,14 @@ void mozek_rozhoduj() {
         break;
 
     // ──────────────────────────────────────────────────────
-    //  VYHÝBÁM SE SOUPEŘI (1:1 se simulátorem)
+    //  VYHÝBÁM SE SOUPEŘI — podjíždíme celého soupeře najednou
+    //
+    //  Logika:
+    //    krok 0: Otoč se dolů (90° od lajny)
+    //    krok 1: Jeď dolů, dokud soupeř ZMIZÍ ze směru lajny
+    //    krok 2: Zastaveno, otočit zpět na lajnu
+    //    krok 3: Pokračuj v jízdě po lajně
+    //    krok 10: Alternativní únik (nemám místo / soupeř pod námi)
     // ──────────────────────────────────────────────────────
     case STAV_VYHYBAM_SE_SOUPERI:
         switch (krok) {
@@ -1060,12 +1067,12 @@ void mozek_rozhoduj() {
                 if (!ma_misto_dole) {
                     // U spodní stěny — nemůžeme dolů → otočíme se a jedeme zpět
                     Serial.println("[MOZEK] Soupeř blokuje a nemám místo dolů! Otáčím zpět.");
-                    mozek_otoc_o_180();  // Robot míří po lajně, 180° otočí
+                    mozek_otoc_o_180();
                     navigace.smer_doprava = !navigace.smer_doprava;
                     krok = 10;
                     break;
                 }
-                // Zkontroluj LiDARem dolů
+                // Zkontroluj LiDARem dolů — jestli tam soupeř taky nestojí
                 if (souper_v_smeru(180.0f, 500.0f, 45.0f)) {
                     Serial.println("[MOZEK] Lidar vidí soupeře pod námi! Vracím se starou lajnou.");
                     navigace.smer_doprava = !navigace.smer_doprava;
@@ -1073,7 +1080,7 @@ void mozek_rozhoduj() {
                     krok = 10;
                     break;
                 }
-                // Natočení dolů
+                // Natočení dolů (pryč od soupeře)
                 if (navigace.smer_doprava)
                     mozek_otoc_o_90(false);
                 else
@@ -1081,7 +1088,7 @@ void mozek_rozhoduj() {
                 krok = 1;
                 break;
             }
-            case 1:
+            case 1: // Jeď dolů — dokud soupeř nezmizí ze směru lajny
                 if (rbcx_hotovo()) {
                     mozek_start_jizdy(40);
                     cas_krok_ms = millis();
@@ -1089,47 +1096,75 @@ void mozek_rozhoduj() {
                 }
                 break;
             case 2: {
+                // Směr lajny (kam robot pojede PO otočení zpět)
+                float tar_h = navigace.smer_doprava ? 90.0f : -90.0f;
+                unsigned long cas_dolu_v = millis() - cas_krok_ms;
+
+                // [A] Soupeř přímo v cestě (i dolů) → nouzový únik zpět
                 if (souper_v_ceste()) {
                     posli_prikaz(CMD_STOP);
-                    Serial.println("[MOZEK] Soupeř se připletl do úhybu! Vracím se.");
-                    // Robot míří DOLŮ (180°). Otoč 90° zpět na lajnu:
-                    if (navigace.smer_doprava)
-                        mozek_otoc_o_90(false);  // 180°→-90° (LEFT)
-                    else
-                        mozek_otoc_o_90(true);   // 180°→90° (RIGHT)
-                    navigace.smer_doprava = !navigace.smer_doprava;
-                    krok = 10;
-                    break;
-                }
-                unsigned long cas_dolu_v = millis() - cas_krok_ms;
-                if (cas_krok_ms > 0 && cas_dolu_v > 1500) {
-                    float tar_h = navigace.smer_doprava ? 90.0f : -90.0f;
-                    if (!souper_v_smeru(tar_h, VZDALENOST_SOUPERE_VOLNO, 45.0f)) {
-                        posli_prikaz(CMD_STOP);
-                        krok = 3;
-                    } else if (cas_dolu_v > 6000) {
-                        posli_prikaz(CMD_STOP);
-                        krok = 3;
-                    }
-                }
-                break;
-            }
-            case 3:
-                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Soupeř i dolů! Otáčím zpět na lajnu opačně.");
                     if (navigace.smer_doprava)
                         mozek_otoc_o_90(true);
                     else
                         mozek_otoc_o_90(false);
+                    navigace.smer_doprava = !navigace.smer_doprava;
+                    krok = 10;
+                    break;
+                }
+
+                // [B] Náraz vpředu (zeď dole)
+                if (naraz_vpredu()) {
+                    posli_prikaz(CMD_COUVEJ, 100);
+                    Serial.println("[MOZEK] Náraz dolů při vyhýbání! Couvám a otáčím zpět.");
+                    krok = 3;
+                    break;
+                }
+
+                // [C] Blízko spodní zdi
+                if (senzory.dist_vpredu <= 300.0f || senzory.pozice_y <= BEZPECNA_VZDALENOST_DOMOV_Y) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.println("[MOZEK] Blízko zdi při vyhýbání → otáčím zpět.");
+                    krok = 3;
+                    break;
+                }
+
+                // [D] Hlavní podmínka: soupeř ZMIZL ze směru lajny → hotovo
+                //     Čekáme aspoň 500ms, aby LiDAR měl čas aktualizovat
+                if (cas_dolu_v > 500 && !souper_v_smeru(tar_h, VZDALENOST_SOUPERE_VOLNO, UHEL_SOUPERE_VPRED)) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.printf("[MOZEK] Soupeř podjet! (jeli jsme %.1fs dolů)\\n", cas_dolu_v / 1000.0f);
+                    krok = 3;
+                    break;
+                }
+
+                // [E] Pojistka: max 8 sekund jízdy dolů
+                if (cas_dolu_v > 8000) {
+                    posli_prikaz(CMD_STOP);
+                    Serial.println("[MOZEK] Timeout vyhýbání (8s) → otáčím zpět.");
+                    krok = 3;
+                    break;
+                }
+                break;
+            }
+            case 3: // Otoč se zpět na lajnu (ve STEJNÉM směru jako před vyhýbáním)
+                if (rbcx_hotovo()) {
+                    if (navigace.smer_doprava)
+                        mozek_otoc_o_90(true);   // zpět doprava
+                    else
+                        mozek_otoc_o_90(false);  // zpět doleva
                     krok = 4;
                 }
                 break;
-            case 4:
+            case 4: // Rozjeď se a pokračuj
                 if (rbcx_hotovo()) {
+                    nastav_cil_lajny();
                     mozek_start_jizdy(60);
+                    Serial.printf("[MOZEK] Pokračuji po lajně %s po vyhnutí\\n", navigace.smer_doprava ? "→" : "←");
                     zmen_stav(stav_po_vyhybani);
                 }
                 break;
-            case 10: // Alternativní únik
+            case 10: // Alternativní únik (nemůže dolů)
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
