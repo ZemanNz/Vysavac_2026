@@ -231,6 +231,8 @@ static bool  vyh_souper_viden = false;   // viděli jsme soupeře na boku?
 static int   vyh_lidar_volno = 0;        // kolikrát LiDAR řekl "volno" za sebou
 static bool  vyh_lidar_ok = false;       // LiDAR 2× potvrdil
 static int   vyh_uz_volno = 0;           // kolikrát UZ řekl "volno" za sebou
+static bool  vyh_uz_videl = false;       // UZ reálně soupeře spatřil (ochrana proti malým robotům)
+static unsigned long vyh_lidar_ok_ms = 0; // Kdy LiDAR naposledy potvrdil volno
 static float vyh_posledni_bok = -1.0f;   // pro detekci nových LiDAR dat
 
 // Mapa pokrytí
@@ -847,7 +849,7 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
-                    delay(1000);
+                    delay(100);
                     mozek_otoc_o_90(true);
                     krok = 2;
                 }
@@ -860,7 +862,7 @@ void mozek_rozhoduj() {
                 break;
             case 3:
                 if (rbcx_hotovo()) {
-                    delay(500); // Malá pauza pro jistotu po mechanice
+                    delay(100); // Malá pauza pro jistotu po mechanice
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
                     Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
@@ -966,7 +968,7 @@ void mozek_rozhoduj() {
                 break;
             case 2:
                 if (rbcx_hotovo()) {
-                    delay(1000);
+                    delay(100);
                     mozek_startovni_y_prejezdu = senzory.pozice_y;
                     mozek_startovni_lidar_prejezdu = senzory.dist_vpredu;
                     
@@ -1032,7 +1034,7 @@ void mozek_rozhoduj() {
                     Serial.printf("[MOZEK] Prejezd REALNE DOKONCEN: Ujeto LIDAR %.1f mm, SLAM %.1f mm (cil 200)\n", 
                         ujeto_total_lidar, ujeto_total_slam);
 
-                    delay(1000);
+                    delay(100);
                     if (navigace.smer_doprava)
                         mozek_otoc_o_90(false);
                     else
@@ -1048,7 +1050,7 @@ void mozek_rozhoduj() {
                 break;
             case 6:
                 if (rbcx_hotovo()) {
-                    delay(500);
+                    delay(100);
                     dalsi_lajna();
                     nastav_cil_lajny();
                     mozek_start_jizdy(60);
@@ -1094,11 +1096,11 @@ void mozek_rozhoduj() {
                 
                 // Určíme stranu soupeře
                 if (navigace.smer_doprava) {
-                    vyh_strana = 'R';    // jeli jsme doprava → soupeř je vpravo
-                    mozek_otoc_o_90(false); // otočíme doleva (dolů)
+                    vyh_strana = 'L';       // jeli jsme doprava, otočili doprava (dolů) → soupeř je vlevo
+                    mozek_otoc_o_90(false); // otočíme doprava (dolů)
                 } else {
-                    vyh_strana = 'L';    // jeli jsme doleva → soupeř je vlevo
-                    mozek_otoc_o_90(true);  // otočíme doprava (dolů)
+                    vyh_strana = 'R';       // jeli jsme doleva, otočili doleva (dolů) → soupeř je vpravo
+                    mozek_otoc_o_90(true);  // otočíme doleva (dolů)
                 }
                 
                 Serial.printf("[MOZEK] Vyhýbání: soupeř %s, sleduju %s stranu\n",
@@ -1109,6 +1111,8 @@ void mozek_rozhoduj() {
                 vyh_lidar_volno = 0;
                 vyh_lidar_ok = false;
                 vyh_uz_volno = 0;
+                vyh_uz_videl = false;
+                vyh_lidar_ok_ms = 0;
                 vyh_posledni_bok = -1.0f;
                 mozek_start_jizdy(25);  // pomalu kolem soupeře
                 cas_krok_ms = millis();
@@ -1140,6 +1144,12 @@ void mozek_rozhoduj() {
                             vyh_strana == 'R' ? "pravé" : "levé");
                     }
                     
+                    // Globální sledování, jestli UZ už soupeře viděl (kdykoliv během manévru)
+                    if (uz_vidi && !vyh_uz_videl) {
+                        vyh_uz_videl = true;
+                        Serial.println("[MOZEK] *** UZ soupeře zaznamenal! ***");
+                    }
+                    
                     if (vyh_souper_viden) {
                         // FÁZE 1: LiDAR 2× volno
                         if (!vyh_lidar_ok) {
@@ -1151,22 +1161,32 @@ void mozek_rozhoduj() {
                             }
                             if (vyh_lidar_volno >= 2) {
                                 vyh_lidar_ok = true;
-                                Serial.println("[MOZEK] *** LiDAR potvrzeno → sleduju UZ ***");
+                                vyh_lidar_ok_ms = millis();
+                                Serial.printf("[MOZEK] *** LiDAR potvrzeno → %s (čekám min 1.5s)\n",
+                                    vyh_uz_videl ? "sleduju UZ" : "čekám, až ho UZ uvidí");
                             }
                         }
-                        // FÁZE 2: UZ 2× volno
+                        // FÁZE 2: UZ 2× volno (ale musí nejdřív soupeře reálně vidět a musí uplynout 1.5s!)
                         if (vyh_lidar_ok) {
-                            if (!uz_vidi) {
-                                vyh_uz_volno++;
-                                Serial.printf("[MOZEK]   → UZ volno %d/2\n", vyh_uz_volno);
+                            if (!vyh_uz_videl) {
+                                // Soupeř je mezi LiDARem a UZ, ještě k němu nedorazil
+                                // Dál jedeme a čekáme, až ho UZ zaznamená
                             } else {
-                                vyh_uz_volno = 0;
-                            }
-                            if (vyh_uz_volno >= 2) {
-                                Serial.println("[MOZEK] *** SOUPEŘ PŘEJET! *** Popojíždím 100mm...");
-                                posli_prikaz(CMD_JED_SBIREJ, 25, 100); // 100mm rezerva
-                                krok = 2;
-                                break;
+                                if (!uz_vidi) {
+                                    if (millis() - vyh_lidar_ok_ms > 1500) {
+                                        vyh_uz_volno++;
+                                        Serial.printf("[MOZEK]   → UZ volno %d/2\n", vyh_uz_volno);
+                                    }
+                                } else {
+                                    vyh_uz_volno = 0;
+                                }
+                                
+                                if (vyh_uz_volno >= 2) {
+                                    Serial.println("[MOZEK] *** SOUPEŘ PŘEJET! *** Popojíždím 100mm...");
+                                    posli_prikaz(CMD_JED_SBIREJ, 25, 100); // 100mm rezerva
+                                    krok = 2;
+                                    break;
+                                }
                             }
                         }
                     }
