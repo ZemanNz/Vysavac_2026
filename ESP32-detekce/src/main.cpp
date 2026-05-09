@@ -12,10 +12,11 @@
 //    USE_TEST    1  →  test pohybu
 // ============================================================
 #define USE_VIZ     0
-#define USE_MOZEK   1
+#define USE_MOZEK   0
 #define USE_TEST    0
 #define USE_SOUPER  0
 #define USE_SENZORY 0  // Test senzorů (lasery + ultrazvuky, bez LiDARu)
+#define USE_NAVRAT  1  // Test nouzového návratu
 
 // --- Senzory (samostatný režim, nepotřebuje LiDAR ani RBCX) ---
 #if USE_SENZORY
@@ -46,6 +47,10 @@
     #include "test_pohybu.h"
 #endif
 
+#if USE_NAVRAT && !USE_VIZ && !USE_SENZORY
+    #include "test_navratu.h"
+#endif
+
 void setup() {
     #if USE_SENZORY
         test_senzory_init();
@@ -68,6 +73,11 @@ void setup() {
         #if USE_TEST && !USE_VIZ
             test_pohybu_init();
             test_pohybu_sekvence();
+        #endif
+
+        #if USE_NAVRAT && !USE_VIZ
+            test_navratu_init();
+            test_navratu_sekvence();
         #endif
     #endif
 }

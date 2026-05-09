@@ -709,9 +709,13 @@ static float mozek_startovni_y_prejezdu = 0.0f;
 static float mozek_startovni_lidar_prejezdu = 0.0f;
 static unsigned long mozek_posledni_lidar_error_ms = 0;
 
-void mozek_start_jizdy(int rychlost) {
+void mozek_start_jizdy(int rychlost, bool snap_to_grid = true) {
     mozek_aktualizuj_senzory();
-    mozek_cilovy_uhel_jizdy = najdi_nejblizsi_rovnobezku(senzory.heading);
+    if (snap_to_grid) {
+        mozek_cilovy_uhel_jizdy = najdi_nejblizsi_rovnobezku(senzory.heading);
+    } else {
+        mozek_cilovy_uhel_jizdy = senzory.heading;
+    }
     posli_prikaz(CMD_JED_SBIREJ, rychlost);
     mozek_aktualni_rychlost = rychlost;
 }
@@ -1455,28 +1459,43 @@ void mozek_rozhoduj() {
     // ──────────────────────────────────────────────────────
     case STAV_NOUZOVY_NAVRAT:
         switch (krok) {
-            case 0:
-                if (senzory.domov_uhel > 10.0f) {
-                    if (senzory.domov_smer == 'L')
-                        mozek_otoc_relativne(-(senzory.domov_uhel));
-                    else
-                        mozek_otoc_relativne(senzory.domov_uhel);
-                    krok = 1;
-                } else {
+            case 0: {
+                // Vypočteme si absolutní úhel k domovu
+                float dx = MOZEK_HOME_X - senzory.pozice_x;
+                float dy = MOZEK_HOME_Y - senzory.pozice_y;
+                float angle_home_deg = atan2f(dx, dy) * 180.0f / PI;
+                
+                mozek_otoc_se_na(angle_home_deg);
+                krok = 1;
+                break;
+            }
+            case 1:
+                if (rbcx_hotovo()) {
+                    mozek_start_jizdy(90, false); // nezarovnávat na mřížku os
                     krok = 2;
                 }
                 break;
-            case 1:
-                if (rbcx_hotovo()) krok = 2;
-                break;
             case 2:
-                mozek_start_jizdy(90);
-                krok = 3;
-                break;
-            case 3:
                 if (senzory.domov_vzdalenost < 150.0f) {
                     posli_prikaz(CMD_STOP);
+                    krok = 3;
+                } else if (senzory.dist_vpredu < 200.0f) {
+                    Serial.println("[MOZEK] Nouzove zastaveni kvuli zdi pri navratu!");
+                    posli_prikaz(CMD_STOP);
+                    krok = 3;
+                }
+                break;
+            case 3:
+                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Nouzovy navrat - natoceni na vykladaci uhel (0°)...");
+                    mozek_otoc_se_na(0.0f);
+                    krok = 4;
+                }
+                break;
+            case 4:
+                if (rbcx_hotovo()) {
                     zmen_stav(STAV_VYKLADAM_PUKY);
+                    krok = 30; // Přeskoč počáteční otáčení a jdi rovnou na otevírání zásobníků
                 }
                 break;
         }
