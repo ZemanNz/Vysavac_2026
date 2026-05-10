@@ -49,6 +49,8 @@
 // Dvoufázový dojezd (zpomalení před zdí)
 #define ZPOMALENI_VZDALENOST_MM 200.0f
 #define RYCHLOST_DOJEZDU        25
+#define RYCHLOST_LAJNY         75
+#define RYCHLOST_NAJEZDU       85
 
 // =============================================================================
 //  KOMUNIKAČNÍ PROTOKOL (musí odpovídat RBCX main_final.cpp!)
@@ -663,10 +665,10 @@ void mozek_otoc_se_na(float target_deg) {
             break; 
         }
 
-        // Tříúrovňová rychlost otáčení (42%, 10%, 3%)
-        int16_t pozadovana_rychlost = (rozdil > 0) ? 42 : -42;
+        // Tříúrovňová rychlost otáčení (34%, 12%, 3%)
+        int16_t pozadovana_rychlost = (rozdil > 0) ? 34 : -34;
         if (fabs(rozdil) <= 60.0f) {
-            pozadovana_rychlost = (rozdil > 0) ? 10 : -10;
+            pozadovana_rychlost = (rozdil > 0) ? 12 : -12;
         }
         if (fabs(rozdil) <= 12.0f) {
             pozadovana_rychlost = (rozdil > 0) ? 3 : -3;
@@ -803,7 +805,7 @@ void mozek_rozhoduj() {
                 break;
             case 11: // Čekání na otevření soupeřova zásobníku
                 if (rbcx_hotovo()) {
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_NAJEZDU);
                     krok = 0;
                 }
                 break;
@@ -868,7 +870,7 @@ void mozek_rozhoduj() {
             case 3:
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_NAJEZDU);
                     Serial.println("[MOZEK] Nahoře! Lajna 0 → DOLEVA");
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
@@ -1054,7 +1056,7 @@ void mozek_rozhoduj() {
                 if (rbcx_hotovo()) {
                     dalsi_lajna();
                     nastav_cil_lajny();
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     Serial.printf("[MOZEK] Lajna %s\n", navigace.smer_doprava ? "→" : "←");
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
@@ -1062,7 +1064,7 @@ void mozek_rozhoduj() {
             case 10: // Únik zpět
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
@@ -1236,7 +1238,7 @@ void mozek_rozhoduj() {
             case 4: // Rozjeď se a pokračuj
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     Serial.printf("[MOZEK] Pokračuji po lajně %s po vyhnutí\n", navigace.smer_doprava ? "→" : "←");
                     zmen_stav(stav_po_vyhybani);
                 }
@@ -1244,7 +1246,7 @@ void mozek_rozhoduj() {
             case 10: // Alternativní únik (nemůže dolů)
                 if (rbcx_hotovo()) {
                     nastav_cil_lajny();
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
@@ -1320,7 +1322,7 @@ void mozek_rozhoduj() {
             // === Cesta A: Z levé strany ===
             case 10:
                 if (rbcx_hotovo()) {
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     krok = 11;
                 }
                 break;
@@ -1523,7 +1525,7 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     krok = 2;
                 }
                 break;
@@ -1556,7 +1558,7 @@ void mozek_rozhoduj() {
             case 20:
                 if (souper_volno()) {
                     Serial.println("[MOZEK] Cesta Y volná, pokračuji.");
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     krok = 2;
                 }
                 break;
@@ -1605,7 +1607,7 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     krok = 2;
                 }
                 break;
@@ -1639,7 +1641,7 @@ void mozek_rozhoduj() {
             case 21:
                 if (souper_volno()) {
                     Serial.println("[MOZEK] Cesta X volná, pokračuji.");
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     krok = 2;
                 }
                 break;
@@ -1659,7 +1661,7 @@ void mozek_rozhoduj() {
             }
             case 4:
                 if (rbcx_hotovo()) {
-                    mozek_start_jizdy(70);
+                    mozek_start_jizdy(RYCHLOST_LAJNY);
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
