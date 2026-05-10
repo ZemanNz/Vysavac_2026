@@ -12,11 +12,11 @@
 //    USE_TEST    1  →  test pohybu
 // ============================================================
 #define USE_VIZ     0
-#define USE_MOZEK   0
+#define USE_MOZEK   1
 #define USE_TEST    0
 #define USE_SOUPER  0
 #define USE_SENZORY 0  // Test senzorů (lasery + ultrazvuky, bez LiDARu)
-#define USE_NAVRAT  1  // Test nouzového návratu
+#define USE_NAVRAT  0  // Test nouzového návratu
 
 // --- Senzory (samostatný režim, nepotřebuje LiDAR ani RBCX) ---
 #if USE_SENZORY
