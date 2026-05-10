@@ -199,6 +199,7 @@ enum StavRobota : uint8_t {
     STAV_NOUZOVY_NAVRAT,            // Čas končí — řítíme se domů
     STAV_PRESUN_Y,                  // Dynamický přesun na ose Y
     STAV_PRESUN_X,                  // Dynamický přesun na ose X
+    STAV_VYHODNOT_DYNAMICKY_CIL,    // Výpočet dalšího cíle pro dynamickou jízdu
 };
 
 const char* jmeno_stavu(StavRobota s) {
@@ -213,6 +214,7 @@ const char* jmeno_stavu(StavRobota s) {
         case STAV_NOUZOVY_NAVRAT:         return "NOUZOVY_NAVRAT";
         case STAV_PRESUN_Y:               return "PRESUN_Y";
         case STAV_PRESUN_X:               return "PRESUN_X";
+        case STAV_VYHODNOT_DYNAMICKY_CIL: return "DALSI_DYNAM_CIL";
         default:                          return "???";
     }
 }
@@ -473,11 +475,12 @@ bool vypocti_dalsi_cil(float &out_start_x, float &out_end_x, float &out_y, int &
     int nej_delka = 0;
     int nej_sx = -1, nej_ex = -1, nej_y_row = -1;
 
-    for (int by = 0; by < POCET_BUNEK_Y; by++) {
+    // Ignorujeme vnější čtverečky u všech stěn (a nahoře 2 řádky), protože k nim robot nemá dobrý přístup
+    for (int by = 1; by < POCET_BUNEK_Y - 2; by++) {
         int delka_sekvence = 0;
         int start_x_idx = -1;
         
-        for (int x_idx = 0; x_idx < POCET_BUNEK_X; x_idx++) {
+        for (int x_idx = 1; x_idx < POCET_BUNEK_X - 1; x_idx++) {
             if (!mapa_pokryti[x_idx][by]) {
                 if (delka_sekvence == 0) start_x_idx = x_idx;
                 delka_sekvence++;
@@ -495,7 +498,7 @@ bool vypocti_dalsi_cil(float &out_start_x, float &out_end_x, float &out_y, int &
         if (delka_sekvence > nej_delka) {
             nej_delka = delka_sekvence;
             nej_sx = start_x_idx;
-            nej_ex = POCET_BUNEK_X - 1;
+            nej_ex = POCET_BUNEK_X - 2;
             nej_y_row = by;
         }
     }
@@ -895,10 +898,14 @@ void mozek_rozhoduj() {
             posli_prikaz(CMD_COUVEJ, 100);
             
             // Počkáme na dokončení couvání v novém sub-stavu
-            if (senzory.pozice_y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0f))) {
-                zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+            if (dynamicky_rezim) {
+                zmen_stav(STAV_VYHODNOT_DYNAMICKY_CIL);
             } else {
-                zmen_stav(STAV_VYKLADAM_PUKY);
+                if (senzory.pozice_y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0f))) {
+                    zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+                } else {
+                    zmen_stav(STAV_VYKLADAM_PUKY);
+                }
             }
             break;
         }
@@ -919,12 +926,17 @@ void mozek_rozhoduj() {
 
             if (limit_x || limit_lidar) {
                 posli_prikaz(CMD_STOP);
-                if (senzory.pozice_y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0f))) {
-                    Serial.printf("[MOZEK] Konec lajny (Pozice:%d, Lidar:%d) na Y=%.0f → PŘECHOD\n", limit_x, limit_lidar, senzory.pozice_y);
-                    zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+                if (dynamicky_rezim) {
+                    Serial.printf("[MOZEK] Konec dynamickeho useku (Pozice:%d, Lidar:%d) na Y=%.0f\n", limit_x, limit_lidar, senzory.pozice_y);
+                    zmen_stav(STAV_VYHODNOT_DYNAMICKY_CIL);
                 } else {
-                    Serial.printf("[MOZEK] Lajna na dně Y=%.0f hotová → VYKLÁDÁM\n", senzory.pozice_y);
-                    zmen_stav(STAV_VYKLADAM_PUKY);
+                    if (senzory.pozice_y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0f))) {
+                        Serial.printf("[MOZEK] Konec lajny (Pozice:%d, Lidar:%d) na Y=%.0f → PŘECHOD\n", limit_x, limit_lidar, senzory.pozice_y);
+                        zmen_stav(STAV_PRECHOD_NA_DALSI_LAJNU);
+                    } else {
+                        Serial.printf("[MOZEK] Lajna na dně Y=%.0f hotová → VYKLÁDÁM\n", senzory.pozice_y);
+                        zmen_stav(STAV_VYKLADAM_PUKY);
+                    }
                 }
                 break;
             } else if (mozek_aktualni_rychlost > RYCHLOST_DOJEZDU) {
@@ -1665,6 +1677,23 @@ void mozek_rozhoduj() {
                     zmen_stav(STAV_JEDU_LAJNU);
                 }
                 break;
+        }
+        break;
+
+    // ──────────────────────────────────────────────────────
+    //  VÝPOČET DALŠÍHO DYNAMICKÉHO CÍLE
+    // ──────────────────────────────────────────────────────
+    case STAV_VYHODNOT_DYNAMICKY_CIL:
+        if (rbcx_hotovo()) {
+            int dummy_row;
+            if (vypocti_dalsi_cil(dyn_start_x, dyn_end_x, dyn_y, dummy_row)) {
+                Serial.printf("[MOZEK] ═══ DALŠÍ DYNAMICKÝ ÚSEK ═══\n");
+                Serial.printf("[MOZEK] Úsek: Y=%.0f, X=%.0f až %.0f\n", dyn_y, dyn_start_x, dyn_end_x);
+                zmen_stav(STAV_PRESUN_Y);
+            } else {
+                Serial.println("[MOZEK] Mapa vyčištěna! Jedeme vyložit.");
+                zmen_stav(STAV_VYKLADAM_PUKY);
+            }
         }
         break;
 
