@@ -669,11 +669,11 @@ void mozek_otoc_se_na(float target_deg) {
         }
 
         // Tříúrovňová rychlost otáčení (34%, 12%, 3%)
-        int16_t pozadovana_rychlost = (rozdil > 0) ? 34 : -34;
-        if (fabs(rozdil) <= 60.0f) {
+        int16_t pozadovana_rychlost = (rozdil > 0) ? 30 : -30;
+        if (fabs(rozdil) <= 50.0f) {
             pozadovana_rychlost = (rozdil > 0) ? 12 : -12;
         }
-        if (fabs(rozdil) <= 12.0f) {
+        if (fabs(rozdil) <= 10.0f) {
             pozadovana_rychlost = (rozdil > 0) ? 3 : -3;
         }
 
@@ -730,6 +730,20 @@ void mozek_start_jizdy(int rychlost, bool snap_to_grid = true) {
 
 // Forward deklarace (definice je níže)
 void mozek_start_zapasu();
+
+// Zruší zbývající část aktuálního dynamického cíle, pokud narazíme do zdi
+void zrus_aktualni_dynamicky_cil() {
+    int start_bx = bunka_x(dyn_start_x);
+    int end_bx = bunka_x(dyn_end_x);
+    int by = bunka_y(dyn_y);
+    if (start_bx > end_bx) {
+        int tmp = start_bx; start_bx = end_bx; end_bx = tmp;
+    }
+    for (int bx = start_bx; bx <= end_bx; bx++) {
+        mapa_pokryti[bx][by] = true;
+    }
+    Serial.printf("[MOZEK] Dynamický cíl (Y=%d, X=%d..%d) zrušen (nastaven jako pokrytý)\n", by, start_bx, end_bx);
+}
 
 void mozek_rozhoduj() {
     // Přijmi stav z RBCX (neblokující)
@@ -899,6 +913,7 @@ void mozek_rozhoduj() {
             
             // Počkáme na dokončení couvání v novém sub-stavu
             if (dynamicky_rezim) {
+                zrus_aktualni_dynamicky_cil();
                 zmen_stav(STAV_VYHODNOT_DYNAMICKY_CIL);
             } else {
                 if (senzory.pozice_y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0f))) {
@@ -928,6 +943,7 @@ void mozek_rozhoduj() {
                 posli_prikaz(CMD_STOP);
                 if (dynamicky_rezim) {
                     Serial.printf("[MOZEK] Konec dynamickeho useku (Pozice:%d, Lidar:%d) na Y=%.0f\n", limit_x, limit_lidar, senzory.pozice_y);
+                    if (!limit_x) zrus_aktualni_dynamicky_cil();
                     zmen_stav(STAV_VYHODNOT_DYNAMICKY_CIL);
                 } else {
                     if (senzory.pozice_y > (SIRKA_ROBOTA_MM + (SIRKA_ROBOTA_MM / 2.0f))) {
@@ -1543,9 +1559,10 @@ void mozek_rozhoduj() {
                 break;
             case 2: {
                 if (naraz_vpredu()) {
-                    Serial.println("[MOZEK] Náraz při přesunu Y! Couvám 10cm...");
+                    Serial.println("[MOZEK] Náraz při přesunu Y! Ruším cíl a couvám 10cm...");
                     posli_prikaz(CMD_COUVEJ, 100);
-                    krok = 20; // Počkej na volno v kroku 20
+                    zrus_aktualni_dynamicky_cil();
+                    zmen_stav(STAV_VYHODNOT_DYNAMICKY_CIL);
                     break;
                 }
                 if (souper_v_ceste()) {
@@ -1625,9 +1642,10 @@ void mozek_rozhoduj() {
                 break;
             case 2: {
                 if (naraz_vpredu()) {
-                    Serial.println("[MOZEK] Náraz při přesunu X! Couvám 10cm...");
+                    Serial.println("[MOZEK] Náraz při přesunu X! Ruším cíl a couvám 10cm...");
                     posli_prikaz(CMD_COUVEJ, 100);
-                    krok = 21; // Počkej na volno v kroku 21
+                    zrus_aktualni_dynamicky_cil();
+                    zmen_stav(STAV_VYHODNOT_DYNAMICKY_CIL);
                     break;
                 }
                 if (souper_v_ceste()) {
