@@ -788,6 +788,19 @@ void mozek_rozhoduj() {
     //  ČEKÁM NA START
     // ──────────────────────────────────────────────────────
     case STAV_CEKAM_NA_START: {
+        // Automatický start dalších jízd, pokud už zápas běží a zbývá čas
+        if (cas_startu > 0) {
+            unsigned long zbyva_ms = 0;
+            if (millis() - cas_startu < DELKA_ZAPASU_MS) {
+                zbyva_ms = DELKA_ZAPASU_MS - (millis() - cas_startu);
+            }
+            if (zbyva_ms > CAS_NOUZOVEHO_NAVRATU) {
+                Serial.println("[MOZEK] Automatický start další dynamické jízdy!");
+                mozek_start_zapasu();
+                break; // Nečekáme na tlačítko
+            }
+        }
+
         // Start se spouští tlačítkem UP na RBCX, ale až po jeho PUŠTĚNÍ a malé prodlevě
         static bool btn_up_predchozi = false;
         static unsigned long uvolneno_v_ms = 0;
@@ -1298,6 +1311,13 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Vyhazuji soupeřovy puky před návratem...");
+                    posli_prikaz(CMD_OTEVRI_SOUPER);
+                    krok = 15;
+                }
+                break;
+            case 15:
+                if (rbcx_hotovo()) {
                     mozek_start_jizdy(90, false); // nezarovnávat na mřížku os
                     krok = 2;
                 }
@@ -1313,6 +1333,13 @@ void mozek_rozhoduj() {
                 }
                 break;
             case 3:
+                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Navrat domu - zaviram souperuv zasobnik...");
+                    posli_prikaz(CMD_ZAVRI_SOUPER);
+                    krok = 13;
+                }
+                break;
+            case 13:
                 if (rbcx_hotovo()) {
                     Serial.println("[MOZEK] Navrat domu - natoceni na vykladaci uhel (0°)...");
                     mozek_otoc_se_na(0.0f);
@@ -1383,7 +1410,7 @@ void mozek_rozhoduj() {
                 break;
 
             case 50:
-                Serial.println("[MOZEK] Zavírám zásobníky...");
+                Serial.println("[MOZEK] Zavírám naše zásobníky...");
                 posli_prikaz(CMD_ZAVRI_ZASOBNIKY);
                 krok = 51;
                 break;
@@ -1422,6 +1449,13 @@ void mozek_rozhoduj() {
             }
             case 1:
                 if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Vyhazuji soupeřovy puky před nouzovým návratem...");
+                    posli_prikaz(CMD_OTEVRI_SOUPER);
+                    krok = 15;
+                }
+                break;
+            case 15:
+                if (rbcx_hotovo()) {
                     mozek_start_jizdy(90, false); // nezarovnávat na mřížku os
                     krok = 2;
                 }
@@ -1437,6 +1471,13 @@ void mozek_rozhoduj() {
                 }
                 break;
             case 3:
+                if (rbcx_hotovo()) {
+                    Serial.println("[MOZEK] Nouzovy navrat - zaviram souperuv zasobnik...");
+                    posli_prikaz(CMD_ZAVRI_SOUPER);
+                    krok = 13;
+                }
+                break;
+            case 13:
                 if (rbcx_hotovo()) {
                     Serial.println("[MOZEK] Nouzovy navrat - natoceni na vykladaci uhel (0°)...");
                     mozek_otoc_se_na(0.0f);
@@ -1706,7 +1747,8 @@ void mozek_start_zapasu() {
             Serial.printf("[MOZEK] Úsek: Y=%.0f, X=%.0f až %.0f\n", dyn_y, dyn_start_x, dyn_end_x);
             zmen_stav(STAV_PRESUN_Y);
         } else {
-            Serial.println("[MOZEK] Mapa už přejetá!");
+            Serial.println("[MOZEK] Mapa už přejetá! Aréna čistá.");
+            cas_startu = 0; // Ukončí zápas
         }
     }
 }
