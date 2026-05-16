@@ -52,6 +52,10 @@
 #define RYCHLOST_LAJNY         75
 #define RYCHLOST_NAJEZDU       85
 
+// Rezervy pro dynamickou jízdu (zvětšení vybírané plochy)
+#define DYN_REZERVA_X_MM 150.0f   // o kolik se cílový úsek natáhne doleva a doprava
+#define DYN_REZERVA_Y_MM 0.0f     // posun cílového úseku v ose Y (0 = jede přesně středem buňky)
+
 // =============================================================================
 //  KOMUNIKAČNÍ PROTOKOL (musí odpovídat RBCX main_final.cpp!)
 // =============================================================================
@@ -510,6 +514,11 @@ bool vypocti_dalsi_cil(float &out_start_x, float &out_end_x, float &out_y, int &
     out_end_x   = nej_ex * BUNKA_MM + BUNKA_MM / 2.0f;
     out_y       = nej_y_row * BUNKA_MM + BUNKA_MM / 2.0f;
     out_row     = nej_y_row;
+
+    // Aplikování rezerv (zvětšení cílového úseku)
+    out_start_x -= DYN_REZERVA_X_MM;
+    out_end_x   += DYN_REZERVA_X_MM;
+    out_y       += DYN_REZERVA_Y_MM;
 
     // CLAMPING — robot nesmí jet blíž ke zdi
     out_start_x = constrain(out_start_x, BEZPECNA_VZDALENOST_ZDI, NV_ARENA_SIZE - BEZPECNA_VZDALENOST_ZDI);
@@ -1018,7 +1027,14 @@ void mozek_rozhoduj() {
                     mozek_startovni_y_prejezdu = senzory.pozice_y;
                     mozek_startovni_lidar_prejezdu = senzory.dist_vpredu;
                     
-                    if (navigace.smer_doprava) {
+                    bool vykladat_souper = false;
+                    if (senzory.pozice_y >= 1000.0f) {
+                        vykladat_souper = navigace.smer_doprava;  // Y >= 1000: vykládat na pravé stěně
+                    } else {
+                        vykladat_souper = !navigace.smer_doprava; // Y < 1000: vykládat na levé stěně (ochrana domovské zóny)
+                    }
+
+                    if (vykladat_souper) {
                         posli_prikaz(CMD_OTEVRI_SOUPER);
                         krok = 25; // Čekej na otevření
                     } else {
@@ -1300,6 +1316,16 @@ void mozek_rozhoduj() {
     case STAV_VRACIM_SE_DOMU:
         switch (krok) {
             case 0: {
+                if (!dynamicky_rezim) {
+                    bool v_home_x = senzory.pozice_x >= NV_ARENA_SIZE - HOME_ZONA_MM;
+                    bool v_home_y = senzory.pozice_y <= HOME_ZONA_MM;
+                    if (v_home_x && v_home_y) {
+                        Serial.println("[MOZEK] První jízda - jsem v HOME zóně, přeskakuji navigaci na bod a jdu rovnou vykládat.");
+                        krok = 3;
+                        break;
+                    }
+                }
+
                 // Vypočteme si absolutní úhel k domovu
                 float dx = MOZEK_HOME_X - senzory.pozice_x;
                 float dy = MOZEK_HOME_Y - senzory.pozice_y;

@@ -85,7 +85,7 @@ problemy:
 - vyhazovani souperovych puku..... kdyz jedeme z leva do prava aby jsme to znovu nebrali...--- vyhazoval bych to u prejizdeni line... -- done
 
 - SOUPER: 
-- i kdyz je obcas hezky pred nim tak do mej obcas narazi.... --- deje se min(no idea)
+- i kdyz je obcas hezky pred nim tak do mej obcas narazi.... --- deje se min(no idea) 
 - uchytit poradne ultrazvuky....
 - vyresit to ze nekdy ho prejizdi moc dlouho..... --> cist vystup.... + to uchyceni....
 
@@ -109,3 +109,5 @@ problemy:
 - udelat tu druhou jizdu... sama se startuje..... ---> zacinam... uz to nejezdi ke krajnim bodum a dve rady nahore....... ale nadute u toho jede proste do steny zmacknu ... couvne a jede zase dopredu.... do nekonecna... nutno opravi
 
 - problem pri otaceni ... poplete se lidar.... nejak vyresit
+
+- mozna problem s napetim----> resetuje se to .. stalo se 2x..... ---> mozna pridat 2. baterku.... a paralerne zapojit...
