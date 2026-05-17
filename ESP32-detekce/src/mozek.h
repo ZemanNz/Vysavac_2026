@@ -476,38 +476,35 @@ bool najdi_nepokryte(float &cil_x, float &cil_y) {
 // Najdi největší nevyčištěný úsek (odpovídá simulator.py: vypocti_dalsi_cil)
 // Vrací true pokud něco našel, výsledek v out parametrech
 bool vypocti_dalsi_cil(float &out_start_x, float &out_end_x, float &out_y, int &out_row) {
-    int nej_delka = 0;
+    int nej_span = 0;
     int nej_sx = -1, nej_ex = -1, nej_y_row = -1;
 
     // Ignorujeme vnější čtverečky u všech stěn (a nahoře 2 řádky), protože k nim robot nemá dobrý přístup
     for (int by = 1; by < POCET_BUNEK_Y - 2; by++) {
-        int delka_sekvence = 0;
-        int start_x_idx = -1;
+        int prvni_x = -1;
+        int posledni_x = -1;
         
         for (int x_idx = 1; x_idx < POCET_BUNEK_X - 1; x_idx++) {
             if (!mapa_pokryti[x_idx][by]) {
-                if (delka_sekvence == 0) start_x_idx = x_idx;
-                delka_sekvence++;
-            } else {
-                if (delka_sekvence > nej_delka) {
-                    nej_delka = delka_sekvence;
-                    nej_sx = start_x_idx;
-                    nej_ex = x_idx - 1;
-                    nej_y_row = by;
+                if (prvni_x == -1) {
+                    prvni_x = x_idx;
                 }
-                delka_sekvence = 0;
+                posledni_x = x_idx;
             }
         }
-        // Dotažení sekvence na konci řádku
-        if (delka_sekvence > nej_delka) {
-            nej_delka = delka_sekvence;
-            nej_sx = start_x_idx;
-            nej_ex = POCET_BUNEK_X - 2;
-            nej_y_row = by;
+        
+        if (prvni_x != -1) {
+            int span = posledni_x - prvni_x + 1;
+            if (span > nej_span) {
+                nej_span = span;
+                nej_sx = prvni_x;
+                nej_ex = posledni_x;
+                nej_y_row = by;
+            }
         }
     }
 
-    if (nej_delka == 0) return false;
+    if (nej_span == 0) return false;
 
     // Středy buněk → mm
     out_start_x = nej_sx * BUNKA_MM + BUNKA_MM / 2.0f;
